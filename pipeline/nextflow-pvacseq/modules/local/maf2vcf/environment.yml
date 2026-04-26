@@ -1,0 +1,7 @@
+name: maf2vcf
+channels:
+  - conda-forge
+  - bioconda
+  - defaults
+dependencies:
+  - bioconda::vcf2maf=1.6.21

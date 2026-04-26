@@ -1,0 +1,38 @@
+{
+    "Both MHC Class I and II are required": {
+        "content": [
+            207372,
+            83505,
+            123867
+        ],
+        "meta": {
+            "nf-test": "0.9.2",
+            "nextflow": "25.04.4"
+        },
+        "timestamp": "2025-08-31T14:17:05.052589454"
+    },
+    "Only MHC Class I is required": {
+        "content": [
+            83505,
+            83505,
+            0
+        ],
+        "meta": {
+            "nf-test": "0.9.2",
+            "nextflow": "25.04.4"
+        },
+        "timestamp": "2025-08-31T14:16:38.877401781"
+    },
+    "Only MHC Class II is required": {
+        "content": [
+            123867,
+            0,
+            123867
+        ],
+        "meta": {
+            "nf-test": "0.9.2",
+            "nextflow": "25.04.4"
+        },
+        "timestamp": "2025-08-31T14:16:50.454789846"
+    }
+}

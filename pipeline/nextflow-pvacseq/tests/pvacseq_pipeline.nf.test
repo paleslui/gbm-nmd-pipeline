@@ -1,0 +1,49 @@
+nextflow_pipeline {
+
+    name "Test pipeline"
+    script "../main.nf"
+    tag "pipeline"
+
+    test("Full pipeline test with online VEP and IEDB directory check") {
+        when {
+            params {
+                outdir = "$projectDir/tests/pipeline_outdir"
+                fasta = "$projectDir/tests/data/chrY.fa"
+                hla_csv = "$projectDir/tests/data/small_hla.csv"
+                input = "$projectDir/tests/data/input/"
+                pvacseq_iedb = "$projectDir/tests/iedb" // download iedb to this folder
+                extra_vep_args = "--database" // Use online VEP annotation
+                vep_genome = "GRCh38"
+                vep_cache_version = "102"
+                vep_species = "homo_sapiens"
+                pvacseq_algorithm = "all"
+            }
+        }
+        then {
+            def iedb_dir_count = 0
+            path("${params.pvacseq_iedb}").eachFileRecurse(groovy.io.FileType.FILES) {
+                iedb_dir_count++
+            }
+            def outdir_count = 0
+            path("${params.outdir}").eachFileRecurse(groovy.io.FileType.FILES) {
+                outdir_count++
+            }
+            def mhc_i_filtered = "$params.outdir/pvactools/TCGA-F5-6814-01A-31D-1924-10/MHC_Class_I/TCGA-F5-6814-01A-31D-1924-10.filtered.tsv"
+            assert workflow.success
+            assert file(mhc_i_filtered).exists()
+
+            def mhc_i_lines = path(mhc_i_filtered).readLines()
+            assert mhc_i_lines.size() == 2 : "MHC I filtered file should have 1 data lines (header + 1 data)"
+            assert snapshot(
+                // Number of successful tasks
+                workflow.trace.succeeded().size(),
+                // pipeline versions.yml file for multiqc from which Nextflow version is removed because we tests pipelines on multiple Nextflow versions
+                removeNextflowVersion("$params.outdir/pipeline_info/nf_core_pipeline_software_versions.yml"),
+                // For IEDB we only count amount of files
+                iedb_dir_count,
+                // Most of the files are unstable
+                outdir_count
+            ).match()
+        }
+    }
+}

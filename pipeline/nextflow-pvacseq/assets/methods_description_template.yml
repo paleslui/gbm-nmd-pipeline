@@ -1,0 +1,23 @@
+id: "nextflow-pvacseq-methods-description"
+description: "Suggested text and references to use when describing pipeline usage within the methods section of a publication."
+section_name: "nextflow_pvacseq Methods Description"
+section_href: "https://github.com/acg-team/nextflow-pvacseq"
+plot_type: "html"
+data: |
+  <h4>Methods</h4>
+  <p>Data were processed using the <code>nextflow_pvacseq</code> pipeline (v${workflow.manifest.version}) ${doi_text}, build with nf-core template (<a href="https://doi.org/10.1038/s41587-020-0439-x">Ewels <em>et al.</em>, 2020</a>). The pipeline utilising containerised environments from the Bioconda (<a href="https://doi.org/10.1038/s41592-018-0046-7">Grüning <em>et al.</em>, 2018</a>) and BioContainers (<a href="https://doi.org/10.1093/bioinformatics/btx192">da Veiga Leprevost <em>et al.</em>, 2017</a>) projects.</p>
+  <p>The analysis was executed using Nextflow v${workflow.nextflow.version} (<a href="https://doi.org/10.1038/nbt.3820">Di Tommaso <em>et al.</em>, 2017</a>) with the following command:</p>
+  <pre><code>${workflow.commandLine}</code></pre>
+  <p>Software tools and versions used within the pipeline include pVACseq, VEP, vcf2maf, and their dependencies. Detailed version information is available in the "Software Versions" section of this report.</p>
+  <h4>References</h4>
+  <ul>
+    ${tool_bibliography}
+  </ul>
+  <div class="alert alert-info">
+    <h5>Notes:</h5>
+    <ul>
+      ${nodoi_text}
+      <li>The command above does not include parameters specified via config files or profiles. Please ensure relevant config files are provided as supplementary material in your publication.</li>
+      <li>You should cite all tools and software used within this run. Refer to the "Software Versions" section of this report for full details.</li>
+    </ul>
+  </div>

@@ -1,0 +1,61 @@
+nextflow_process {
+
+    name "Test Process ENSEMBLVEP_VEP"
+    script "modules/local/vep/main.nf"
+    process "ENSEMBLVEP_VEP"
+
+    test("ENSEMBLVEP_VEP with small VCF, GRCh38, online cache, and plugins") {
+        setup {
+            run("DOWNLOAD_VEP_PLUGINS") {
+                script "subworkflows/local/setup_vep_env/main.nf"
+                params {
+                    outdir = "$projectDir/tests/outdir"
+                }
+                workflow {
+                    """
+                    input[0] = ["id": "VEP_plugins"]
+                    """
+                }
+            }
+        }
+        when {
+            params {
+                outdir = "$projectDir/tests/outdir"
+                vep_genome = "GRCh38"
+                vep_cache_version = "102"
+                vep_species = "homo_sapiens"
+                fasta = "$projectDir/tests/data/chrY.fa"
+                extra_vep_args = "--database"
+            }
+            process {
+                """
+                input[0] = Channel.of([
+                    [ id:'small' ], // meta map
+                    file('$projectDir/tests/data/input/small.vcf', checkIfExists: true),
+                    []
+                ])
+                input[1] = params.vep_genome
+                input[2] = params.vep_species
+                input[3] = params.vep_cache_version
+                input[4] = []
+                input[5] = Channel.value([
+                    [id:"fasta"],
+                    file(params.fasta, checkIfExists: true)
+                ])
+                input[6] = []
+                input[7] = DOWNLOAD_VEP_PLUGINS.out.vep_plugins.map{ meta, plugins -> [plugins] }
+                """
+            }
+        }
+
+        then {
+            assert process.success
+            def expectedLine = file("$projectDir/tests/data/vep_expected_line.txt").text.trim()
+
+            assert path(process.out.vcf.get(0).get(1))
+                .linesGzip
+                .contains(expectedLine)
+            assert snapshot(process.out.versions).match()
+        }
+    }
+}

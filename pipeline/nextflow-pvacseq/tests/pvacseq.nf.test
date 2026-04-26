@@ -1,0 +1,96 @@
+nextflow_process {
+
+    name "Test Process PVACTOOLS_PVACSEQ"
+    script "modules/local/pvacseq/main.nf"
+    process "PVACTOOLS_PVACSEQ"
+
+    test("Minimal test for pVACseq") {
+        setup {
+            run("CONFIGURE_PVACSEQ_IEDB") {
+                script "subworkflows/local/configure_pvacseq_iedb/main.nf"
+                params {
+                    outdir = "$projectDir/tests/outdir"
+                }
+                workflow {
+                    """
+                    input[0] = "$projectDir/iedb"
+                    input[1] = "all"
+                    """
+                }
+            }
+            run("CONFIGURE_PVACSEQ") {
+                script "modules/local/configure_pvacseq/main.nf"
+                params {
+                    outdir = "$projectDir/tests/outdir"
+                }
+                process {
+                    """
+                    input[0] = CONFIGURE_PVACSEQ_IEDB.out.iedb_dir
+                    input[1] = CONFIGURE_PVACSEQ_IEDB.out.iedb_mhc_i
+                    input[2] = CONFIGURE_PVACSEQ_IEDB.out.iedb_mhc_ii
+                    """
+                }
+            }
+        }
+        when {
+            params {
+                outdir = "$projectDir/tests/outdir"
+                pvacseq_iedb = "$projectDir/iedb"
+            }
+            process {
+                """
+                input[0] = Channel.fromList([tuple(
+                    [id: "vep_annotated", "normal_sample": "TCGA-F5-6814-10A-01D-1924-10"], // meta
+                    "TCGA-F5-6814-01A-31D-1924-10", // tumor sample
+                    "HLA-A*02:01,HLA-A*25:01,HLA-B*38:01,HLA-B*27:05,HLA-C*12:03,HLA-C*02:02,DPA1*01:03-DPB1*105:01",
+                    file("$projectDir/tests/data/vep_annotated.vcf", checkIfExists: true),
+                )])
+                input[1] =  "all"
+                input[2] = CONFIGURE_PVACSEQ.out.iedb_dir
+                input[3] = []
+                input[4] = []
+                input[5] = []
+                input[6] = []
+                """
+            }
+        }
+
+        then {
+            assert process.success
+
+            // We expect MHC Class I output
+            assert process.out.mhc_i_filtered != null : "Expected MHC Class I filtered output, but got null."
+            assert process.out.mhc_i_all_epitopes != null : "Expected MHC Class I all_epitopes output, but got null."
+
+            // We expect MHC Class II output
+            assert process.out.mhc_ii_filtered != null : "Expected MHC Class II filtered output, but got null."
+            assert process.out.mhc_ii_all_epitopes != null : "Expected MHC Class II all_epitopes output, but got null."
+
+            // We expect combined output
+            assert process.out.combined_filtered != null : "Expected combined filtered output, but got null."
+            assert process.out.combined_all_epitopes != null : "Expected combined all_epitopes output, but got null."
+
+            // We expect versions.yml
+            assert process.out.versions != null : "Expected versions.yml output, but got null."
+
+            with(process.out.mhc_i_filtered) {
+                assert size() == 1
+                def mhc_i_lines = path(get(0)[1]).readLines()
+                assert mhc_i_lines.size() == 2 : "MHC I filtered file should have 1 data lines (header + 1 data)"
+            }
+
+            with(process.out.mhc_ii_filtered) {
+                assert size() == 1
+                def mhc_ii_lines = path(get(0)[1]).readLines()
+                assert mhc_ii_lines.size() == 1 : "MHC II filtered file should have only header"
+            }
+
+            with(process.out.combined_filtered) {
+                assert size() == 1
+                def combined_lines = path(get(0)[1]).readLines()
+                assert combined_lines.size() == 2 : "Combined filtered file should have 2 data lines (header + 1 data)"
+            }
+        }
+
+    }
+}

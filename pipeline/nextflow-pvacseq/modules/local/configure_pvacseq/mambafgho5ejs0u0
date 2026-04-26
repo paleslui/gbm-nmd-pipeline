@@ -1,0 +1,10 @@
+tensorflow==2.15.1
+pvactools==5.3.1
+git+https://github.com/griffithlab/bigmhc.git#egg=bigmhc
+git+https://github.com/griffithlab/deepimmuno.git#egg=deepimmuno
+mhcflurry==2.0.6
+mhcgnomes==1.8.6
+mhcnames==0.4.8
+mhcnuggets==2.4.1
+mhctools==1.9.0
+biopython

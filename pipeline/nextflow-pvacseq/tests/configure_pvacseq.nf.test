@@ -1,0 +1,140 @@
+nextflow_process {
+
+    name "Test Process CONFIGURE_PVACSEQ"
+    script "modules/local/configure_pvacseq/main.nf"
+    process "CONFIGURE_PVACSEQ"
+    setup {
+        run("CONFIGURE_PVACSEQ_IEDB") {
+            script "subworkflows/local/configure_pvacseq_iedb/main.nf"
+            params {
+                outdir = "$projectDir/tests/outdir"
+            }
+            workflow {
+                """
+                input[0] = []
+                input[1] = 'all'
+                """
+            }
+        }
+    }
+    test("Should configure with both MHC Class I and II directories provided") {
+
+        when {
+            params {
+                outdir = "$projectDir/tests/outdir"
+            }
+            process {
+                """
+                input[0] = CONFIGURE_PVACSEQ_IEDB.out.iedb_dir
+                input[1] = CONFIGURE_PVACSEQ_IEDB.out.iedb_mhc_i
+                input[2] = CONFIGURE_PVACSEQ_IEDB.out.iedb_mhc_ii
+                """
+            }
+        }
+
+        then {
+            assert process.success
+
+            with(process.out.config_file) {
+                assert size() == 1
+                def config_content = path(get(0)).readLines()
+
+                // Check the number of lines in the file
+                assert config_content.size() == 3
+
+                // Check for specific lines in the file
+                assert config_content.any { it.contains("- MHC Class I configured at:") } : "Missing configuration line for MHC Class I"
+                assert config_content.any { it.contains("- MHC Class II configured at:") } : "Missing configuration line for MHC Class II"
+            }
+        }
+
+    }
+
+    test("Should fail when no directories are provided") {
+
+        when {
+            params {
+                outdir = "$projectDir/tests/outdir"
+            }
+            process {
+                """
+                input[0] = []
+                input[1] = []
+                input[2] = []
+                """
+            }
+        }
+
+        then {
+            assert process.failed
+            assert process.errorReport.contains("Error: No iedb_mhc_i or iedb_mhc_ii provided. At least one is required.")
+        }
+
+    }
+
+    test("Should configure with only MHC Class I directory provided") {
+
+        when {
+            params {
+                outdir = "$projectDir/tests/outdir"
+            }
+            process {
+                """
+                input[0] = CONFIGURE_PVACSEQ_IEDB.out.iedb_dir
+                input[1] = CONFIGURE_PVACSEQ_IEDB.out.iedb_mhc_i
+                input[2] = []
+                """
+            }
+        }
+
+        then {
+            assert process.success
+
+            with(process.out.config_file) {
+                assert size() == 1
+                def config_content = path(get(0)).readLines()
+
+                // Check the number of lines in the file
+                assert config_content.size() == 3
+
+                // Check for specific lines in the file
+                assert config_content.any { it.contains("- MHC Class I configured at:") } : "Missing configuration line for MHC Class I"
+                assert config_content.any { it.contains("- MHC Class II: Not configured.") } : "Wrong configuration line for MHC Class II"
+            }
+        }
+
+    }
+
+    test("Should configure with only MHC Class II directory provided") {
+
+        when {
+            params {
+                outdir = "$projectDir/tests/outdir"
+            }
+            process {
+                """
+                input[0] = CONFIGURE_PVACSEQ_IEDB.out.iedb_dir
+                input[1] = []
+                input[2] = CONFIGURE_PVACSEQ_IEDB.out.iedb_mhc_ii
+                """
+            }
+        }
+
+        then {
+            assert process.success
+            with(process.out.config_file) {
+                assert size() == 1
+                def config_content = path(get(0)).readLines()
+
+                // Check the number of lines in the file
+                assert config_content.size() == 3
+
+                // Check for specific lines in the file
+                assert config_content.any { it.contains("- MHC Class I: Not configured.") } : "Wrong configuration line for MHC Class I"
+                assert config_content.any { it.contains("- MHC Class II configured at:") } : "Missing configuration line for MHC Class II"
+            }
+        }
+
+    }
+
+}

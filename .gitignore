@@ -1,0 +1,43 @@
+# Build artifacts
+miniforge3/
+conda_envs/
+nextflow_work/
+.nextflow/
+.local/
+
+# Resources downloaded by setup.sh (large, regenerable)
+resources/mhcflurry/
+resources/vep_cache/
+resources/iedb/
+
+# Run outputs
+results/
+logs/
+tmp/
+i.*
+
+# User-provided data (large, sensitive)
+data/vcf/*.vcf
+data/vcf/*.vcf.gz
+data/reference/
+*.fai
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Patient HLA typing data (sensitive — provide your own)
+data/hla_typing/
+data/hla_typing_classI.csv

@@ -1,0 +1,44 @@
+pipeline_info/*.{html,json,txt,yml}
+{multiqc,multiqc/**}/pVACseq-pipeline_multiqc_report.html
+{multiqc,multiqc/**}/pVACseq-pipeline_multiqc_report_data/multiqc.log
+{multiqc,multiqc/**}/pVACseq-pipeline_multiqc_report_data/multiqc_data.json
+{multiqc,multiqc/**}/pVACseq-pipeline_multiqc_report_data/multiqc_software_versions.txt
+{multiqc,multiqc/**}/pVACseq-pipeline_multiqc_report_data/multiqc_sources.txt
+{multiqc,multiqc/**}/pVACseq-pipeline_multiqc_report_data/BETA-multiqc.parquet
+{multiqc,multiqc/**}/pVACseq-pipeline_multiqc_report_data/vep-general-stats.txt
+{multiqc,multiqc/**}/pVACseq-pipeline_multiqc_report_data/vep.txt
+{multiqc,multiqc/**}/pVACseq-pipeline_multiqc_report_data/variants_by_chromosome_plot.txt
+{multiqc,multiqc/**}/pVACseq-pipeline_multiqc_report_data/variant_classes_plot.txt
+{multiqc,multiqc/**}/pVACseq-pipeline_multiqc_report_data/position_in_protein_plot.txt
+{multiqc,multiqc/**}/pVACseq-pipeline_multiqc_report_plots/{pdf,png,svg}/*.{pdf,png,svg}
+{multiqc,multiqc/**}/pVACseq-pipeline_multiqc_report_data/consequences_all__plot_Consequences_all_.txt
+{multiqc,multiqc/**}/pVACseq-pipeline_multiqc_report_data/consequences_all__plot_Consequences_most_severe_.txt
+{multiqc,multiqc/**}/pVACseq-pipeline_multiqc_report_data/consequences_all__plot_Coding_consequences.txt
+{pvactools,pvactools/**}/MHC_Class_I/log/inputs.yml
+{pvactools,pvactools/**}/MHC_Class_II/log/inputs.yml
+{pvactools,pvactools/**}/MHC_Class_I/*.all_epitopes.tsv
+{pvactools,pvactools/**}/MHC_Class_II/*.all_epitopes.tsv
+{pvactools,pvactools/**}/combined/*.all_epitopes.tsv
+{pvactools,pvactools/**}/combined/*.all_epitopes.aggregated.metrics.json
+{pvactools,pvactools/**}/MHC_Class_II/*.all_epitopes.aggregated.metrics.json
+{pvactools,pvactools/**}/MHC_Class_I/*.all_epitopes.aggregated.metrics.json
+{vep,vep/**}/*.{vcf,html}
+{download,download/**}
+# Ignore Git-related files
+{download/.git,download/**/.git,.git,.git/**}/*.sample
+
+
+# Git metadata files
+{download/.git,download/**/.git,.git,.git/**}/HEAD
+{download/.git,download/**/.git,.git,.git/**}/config
+{download/.git,download/**/.git,.git,.git/**}/description
+{download/.git,download/**/.git,.git,.git/**}/exclude
+{download/.git,download/**/.git,.git,.git/**}/114
+{download/.git,download/**/.git,.git,.git/**}/index
+{download/.git,download/**/.git,.git,.git/**}/packed-refs
+
+# Git packfiles
+{download/.git,download/**/.git,.git,.git/**}/pack-*.idx
+{download/.git,download/**/.git,.git,.git/**}/pack-*.pack
+{download/.git,download/**/.git,.git,.git/**}/pack-*.rev
+

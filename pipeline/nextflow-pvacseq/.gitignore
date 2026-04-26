@@ -1,0 +1,16 @@
+.nextflow*
+.nf-test*
+.github
+.devcontainer
+.vscode
+work/
+data/
+results/
+.DS_Store
+testing/
+testing*
+*.pyc
+.sendmail_tmp.html
+nextflow.config
+tests/outdir
+tests/pipeline_outdir

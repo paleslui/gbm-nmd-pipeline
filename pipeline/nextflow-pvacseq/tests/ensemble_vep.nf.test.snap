@@ -1,0 +1,14 @@
+{
+    "ENSEMBLVEP_VEP with small VCF, GRCh38, online cache, and plugins": {
+        "content": [
+            [
+                "versions.yml:md5,534306f30b29b830c409da4b0a26bd20"
+            ]
+        ],
+        "meta": {
+            "nf-test": "0.9.2",
+            "nextflow": "25.04.4"
+        },
+        "timestamp": "2025-08-06T12:54:56.832890206"
+    }
+}

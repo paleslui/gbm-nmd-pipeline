@@ -1,0 +1,75 @@
+nextflow_workflow {
+
+    name "Test Subworkflow SETUP_VEP_ENVIRONMENT"
+    script "subworkflows/local/setup_vep_env/main.nf"
+    workflow "SETUP_VEP_ENVIRONMENT"
+
+    test("Both cache and plugins directories exist") {
+
+        when {
+            params {
+                vep_cache = "$projectDir/tests/data/vep_cache"
+                vep_plugins = "$projectDir/tests/data/VEP_plugins"
+                vep_cache_version = "102"
+                vep_genome = "GRCh38"
+                vep_species = "homo_sapiens"
+                outdir = "$projectDir/tests/outdir"
+            }
+            workflow {
+                """
+                input[0] = "$params.vep_cache"
+                input[1] = "$params.vep_cache_version"
+                input[2] = "$params.vep_genome"
+                input[3] = "$params.vep_species"
+                input[4] = "$params.vep_plugins"
+                """
+            }
+        }
+
+        then {
+            assert workflow.success
+            assert (workflow.out.vep_cache).get(0) == "$params.vep_cache"
+            assert (workflow.out.vep_plugins).get(0) == "$params.vep_plugins"
+        }
+
+    }
+
+    test("Download cache and plugins") {
+
+        when {
+            params {
+                vep_cache = []
+                vep_plugins = []
+                vep_cache_version = "113"
+                vep_genome = "WBcel235"
+                vep_species = "caenorhabditis_elegans"
+                outdir = "$projectDir/tests/outdir"
+            }
+            workflow {
+                """
+                input[0] = []
+                input[1] = "$params.vep_cache_version"
+                input[2] = "$params.vep_genome"
+                input[3] = "$params.vep_species"
+                input[4] = []
+                """
+            }
+        }
+
+        then {
+            assert workflow.success
+
+            def stable_path_cache = getAllFilesFromDir(workflow.out.vep_cache.get(0).get(0), ignoreFile: 'tests/.nftignore')
+            def stable_path_plugins = getAllFilesFromDir(workflow.out.vep_plugins.get(0).get(0), ignoreFile: 'tests/.nftignore')
+            assert snapshot(
+                    workflow.out.vep_cache_version,
+                    workflow.out.vep_genome,
+                    workflow.out.vep_species,
+                    // All files with stable contents
+                    stable_path_cache,
+                    stable_path_plugins
+            ).match()
+        }
+
+    }
+}
