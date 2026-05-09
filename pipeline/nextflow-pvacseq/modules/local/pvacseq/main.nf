@@ -84,13 +84,29 @@ process PVACTOOLS_PVACSEQ {
     ].findAll { it }
     .join(" ")
     """
+    # ----------------------------------------------------------------
+    # Localize IEDB to node-local scratch to avoid shared-filesystem
+    # file-open contention during NetMHCpan/NetMHCpanEL parallel
+    # data file reads. Cluster-portability fix; same algorithms,
+    # same logic. See pipeline/scripts/patch_pvacseq_module.py.
+    # ----------------------------------------------------------------
+    LOCAL_SCRATCH=\${LSFM_CLUSTER_LOCAL_SCRATCH_ROOT_PATH:-/data/scratch}/\${SLURM_JOB_ID:-\$\$}
+    LOCAL_IEDB=\$LOCAL_SCRATCH/iedb
+    mkdir -p \$LOCAL_SCRATCH
+    if [ ! -d "\$LOCAL_IEDB" ]; then
+        echo "[\$(date)] Copying IEDB to node-local scratch: \$LOCAL_IEDB"
+        cp -r ${iedb}/. \$LOCAL_IEDB/
+        echo "[\$(date)] IEDB copy complete"
+    fi
+
     pvacseq run \\
-        $vcf \\
-        $sample_name \\
-        $hla \\
-        $algorithms \\
-        $prefix \\
-        $optional_args
+        ${vcf} \\
+        ${sample_name} \\
+        ${hla} \\
+        ${algorithms} \\
+        ${prefix} \\
+        --iedb-install-directory \$LOCAL_IEDB ${blastp_opt} ${genes_opt} ${phased_opt} ${args} -t ${task.cpus}
+
 
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":

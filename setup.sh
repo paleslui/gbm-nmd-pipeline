@@ -98,7 +98,7 @@ else
     echo "[INFO] Building nf_pvacseq env with mamba (Nextflow + Java)..."
     mamba create -y -p $NF_ENV_PATH \
         -c conda-forge -c bioconda \
-        nextflow openjdk python=3.11 samtools
+        nextflow=25.10.* openjdk python=3.11 samtools
     echo "[OK] nf_pvacseq environment created"
 fi
 
@@ -132,7 +132,7 @@ if [ -d "$VEP_ENV" ] || [ -L "$VEP_ENV" ]; then
     echo "[OK] VEP env already exists"
 else
     echo "[INFO] Building VEP environment (~20-30 min)..."
-    mamba env create -p $VEP_ENV \
+    mamba env create --yes -p $VEP_ENV \
         --file $NF_PIPELINE/modules/local/vep/environment.yml
     echo "[OK] VEP environment built"
 fi
@@ -143,7 +143,7 @@ if [ -d "$PVACSEQ_ENV" ] || [ -L "$PVACSEQ_ENV" ]; then
     echo "[OK] pVACseq env already exists"
 else
     echo "[INFO] Building pVACseq environment (~20-30 min)..."
-    mamba env create -p $PVACSEQ_ENV \
+    mamba env create --yes -p $PVACSEQ_ENV \
         --file $NF_PIPELINE/modules/local/configure_pvacseq/environment.yml
     echo "[OK] pVACseq environment built"
 fi
@@ -154,7 +154,7 @@ if [ -d "$MULTIQC_ENV" ] || [ -L "$MULTIQC_ENV" ]; then
     echo "[OK] MultiQC env already exists"
 else
     echo "[INFO] Building MultiQC environment (~5 min)..."
-    mamba env create -p $MULTIQC_ENV \
+    mamba env create --yes -p $MULTIQC_ENV \
         --file $NF_PIPELINE/modules/nf-core/multiqc/environment.yml
     echo "[OK] MultiQC environment built"
 fi
@@ -298,6 +298,16 @@ for f in $BASE/pipeline/slurm/*.sh; do
 done
 echo "[OK] All slurm scripts: __BASE__ replaced with $BASE"
 echo "[OK] Pipeline scripts updated"
+
+
+echo ""
+echo "[STEP 9] Patching pVACseq Nextflow module (cluster-portability fix)..."
+# The published nf-core pVACseq module reads IEDB data files from the work dir,
+# which on shared parallel filesystems (BeeGFS, Lustre) can hit transient
+# open() failures under high concurrent I/O. This patch makes the module copy
+# IEDB to node-local scratch before invoking pvacseq run. Idempotent.
+python3 "$BASE/pipeline/scripts/patch_pvacseq_module.py" \
+    "$NF_PIPELINE/modules/local/pvacseq/main.nf"
 
 # ── Done ──────────────────────────────────────────────────────────────────────
 echo ""

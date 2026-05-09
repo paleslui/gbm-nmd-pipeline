@@ -41,3 +41,20 @@ Thumbs.db
 # Patient HLA typing data (sensitive — provide your own)
 data/hla_typing/
 data/hla_typing_classI.csv
+
+# Debugging artifacts and intermediate run state
+Slurm-*/
+*.bak
+*.bak[0-9]
+*.bak_*
+data/sample_list.txt
+data/vcf/.backup_*/
+data/vcf_filtered/
+data/vcf_filtered_decompressed/
+test_filter/
+validation_archive/
+
+# DIY array script (alternative pVACseq runner, not used in canonical pipeline)
+pipeline/slurm/slurm_pvacseq_array.sh
+pipeline/slurm/launch_pvacseq_array.sh
+pipeline/slurm/test_one_pvacseq.sh

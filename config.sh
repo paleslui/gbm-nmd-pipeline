@@ -67,3 +67,10 @@ TMP=$BASE/tmp
 
 # pVACseq algorithms (Class I only — Class II requires separate HLA typing)
 PVACSEQ_ALGORITHMS="MHCflurry MHCnuggetsI NetMHC NetMHCpan NetMHCpanEL PickPocket SMM SMMPMBEC"
+
+
+export NXF_HOME=$BASE/.nextflow
+
+export PYTHONUSERBASE=$BASE/.local
+
+export MHCFLURRY_DATA_PATH=$BASE/resources/mhcflurry

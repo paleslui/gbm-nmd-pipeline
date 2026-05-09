@@ -4,7 +4,7 @@
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=32G
-#SBATCH --time=02:00:00
+#SBATCH --time=06:00:00
 #SBATCH --mail-type=ALL
 #SBATCH --output=__BASE__/logs/Slurm-%j.out
 #SBATCH --error=__BASE__/logs/Slurm-%j.err
