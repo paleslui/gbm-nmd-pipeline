@@ -4,7 +4,7 @@ A computational pipeline for identifying NMD-sensitive immunogenic mutations in 
 
 **Thesis:** Identifying NMD-Sensitive Immunogenic Mutations in Primary and Recurrent Glioblastoma  
 **Author:** Luigi Palese  
-**Supervisors:** Erik Vassella, Massimo Maiolo, Tugce Bilgin Sonay, Maria Anisimova  
+**Supervisors:** Maria Anisimova, Tugce Bilgin Sonay, Erik Vassella, Massimo Maiolo
 
 ---
 
