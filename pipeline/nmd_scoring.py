@@ -301,13 +301,29 @@ def plot_ic50(scored_df: pd.DataFrame) -> str:
     df = df[df['best_ic50'] < 9000].sort_values('best_ic50')
     df['label'] = df['Gene Name'] + '\n' + df['hla_allele'].str.replace('HLA-','')
 
+    if df.empty:
+        return ''
     fig, ax = plt.subplots(figsize=(10, max(4, len(df)*0.35 + 1)))
     colors = [color_map.get(c, '#aaa') for c in df['nmd_consensus']]
     ax.scatter(df['best_ic50'], range(len(df)), c=colors, s=80, zorder=3)
     ax.set_yticks(range(len(df)))
     ax.set_yticklabels(df['label'], fontsize=8)
-    ax.axvline(50,  color='#555', linestyle='--', lw=0.8, label='50 nM (Tier 1 threshold)')
-    ax.axvline(500, color='#999', linestyle=':', lw=0.8, label='500 nM (Tier 2/3 threshold)')
+
+    # Log scale x-axis: IC50 spans 5+ orders of magnitude (sub-nM to thousands)
+    # so log scale is the standard biochemistry presentation and lets sub-50
+    # nM strong binders be distinguished from each other.
+    xmin_data = max(0.01, float(df['best_ic50'].min()))
+    xmax_data = float(df['best_ic50'].max())
+    # Pad symmetrically in log space (0.7x lower, 1.3x upper)
+    xmin = xmin_data * 0.7
+    xmax = xmax_data * 1.3
+    ax.set_xscale('log')
+    ax.set_xlim(xmin, xmax)
+
+    if xmin <= 50 <= xmax:
+        ax.axvline(50,  color='#555', linestyle='--', lw=0.8, label='50 nM (Tier 1 threshold)')
+    if xmin <= 500 <= xmax:
+        ax.axvline(500, color='#999', linestyle=':', lw=0.8, label='500 nM (Tier 2/3 threshold)')
     ax.set_xlabel("Best MT IC50 Score (nM)")
     ax.set_title("IC50 per candidate — colored by NMD consensus", fontsize=12)
     from matplotlib.patches import Patch

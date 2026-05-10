@@ -4,26 +4,24 @@ nmd_cohort_summary.py — GBM Pipeline Stage 3: NMD Cohort Summary
 Part of the GBM NMD-Neoantigen Pipeline.
 https://github.com/paleslui/gbm-nmd-pipeline
 
-Aggregates per-sample NMD scoring outputs (Stage 3 per_sample/) into:
-  - cohort_candidates.tsv : all candidates with sample/patient/timepoint
-  - cohort_summary.tsv    : cohort-level counts (tier, NMD, by patient)
-  - cohort_tier1.tsv      : TIER1 high-priority candidates only
-  - cohort_paired.tsv     : per-patient T (primary) vs M (recurrent) comparison
-  - cohort_report.html    : single HTML report mirroring the per-sample style
-                            (same plotting functions imported from nmd_scoring.py)
-                            plus cohort-specific plots:
-                              - tier-by-timepoint
-                              - per-patient paired bar chart
-                              - top genes producing TIER1 candidates
+Aggregates per-sample NMD scoring outputs into a single cohort report.
+Focuses on NMD-actionable neoantigen candidates (frameshift only).
+Missense, inframe and stop_gained variants are summarized at the top
+(variant landscape) but excluded from downstream NMD analysis.
+
+Outputs (in --out_dir):
+  cohort_candidates.tsv     all candidates, all variant types
+  cohort_summary.tsv        cohort-level counts (variant landscape + FS NMD)
+  cohort_paired.tsv         per-patient T (primary) vs M (recurrent), FS only
+  cohort_tier1.tsv          TIER1 high-priority candidates only
+  cohort_report.html        single HTML report (mirrors per-sample style;
+                            adds T-vs-M paired plot, top recurrent genes,
+                            and an interactive per-sample drill-down widget)
 
 Usage:
   python nmd_cohort_summary.py --input_dir <per_sample_dir> --out_dir <cohort_dir>
-
-  --input_dir : dir containing one subdir per sample (each with
-                nmd_scored_candidates.tsv); typically run_*/3_nmd_analysis/per_sample/
-  --out_dir   : where cohort_*.{tsv,html} are written
 """
-import argparse, re, sys
+import argparse, json, re, sys
 from pathlib import Path
 
 import pandas as pd
@@ -37,8 +35,20 @@ from nmd_scoring import (
     hla_allele_breakdown, _b64fig, COL_S, COL_I, COL_U,
 )
 
-# Sample dir name like "11_T" or "11_M"
 SAMPLE_RE = re.compile(r"^(\d+)_([TM])$")
+
+# Variant types kept for NMD-actionable downstream analysis
+NMD_ACTIONABLE = {"FS"}
+
+# ─── Cohort-specific palette (extra colors not in nmd_scoring.py) ────────────
+COL_T = "#378ADD"   # primary
+COL_M = "#D85A30"   # recurrent
+COL_TIER1 = "#F0C040"
+COL_TIER2 = "#F5944D"
+COL_TIER3 = "#378ADD"
+COL_FS = "#D85A30"
+COL_MIS = "#888888"
+COL_INFRAME = "#bbbbbb"
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -46,7 +56,7 @@ SAMPLE_RE = re.compile(r"^(\d+)_([TM])$")
 # ═════════════════════════════════════════════════════════════════════════════
 
 def load_cohort(per_sample_dir: Path) -> pd.DataFrame:
-    """Load all per-sample TSVs from per_sample_dir/{sample}/nmd_scored_candidates.tsv"""
+    """Load per-sample TSVs from per_sample_dir/<sample>/nmd_scored_candidates.tsv"""
     rows = []
     sample_dirs = sorted(p for p in per_sample_dir.iterdir() if p.is_dir())
     print(f"[INFO] Found {len(sample_dirs)} per-sample dirs")
@@ -80,11 +90,10 @@ def load_cohort(per_sample_dir: Path) -> pd.DataFrame:
     if not rows:
         return pd.DataFrame()
     cohort = pd.concat(rows, ignore_index=True)
-    # Coerce numeric cols used downstream (in nmd_scoring.py these are floats)
     for col in ("best_ic50", "median_ic50", "nmd_confidence_score"):
         if col in cohort.columns:
             cohort[col] = pd.to_numeric(cohort[col], errors="coerce")
-    print(f"[INFO] Cohort total: {len(cohort)} candidates from {cohort['sample'].nunique()} samples")
+    print(f"[INFO] Cohort: {len(cohort)} candidates from {cohort['sample'].nunique()} samples")
     return cohort
 
 
@@ -92,40 +101,59 @@ def load_cohort(per_sample_dir: Path) -> pd.DataFrame:
 # AGGREGATE TABLES
 # ═════════════════════════════════════════════════════════════════════════════
 
-def cohort_summary(cohort: pd.DataFrame, n_input_samples: int) -> pd.DataFrame:
-    """Cohort-level aggregate counts."""
+def variant_landscape(cohort: pd.DataFrame) -> pd.DataFrame:
+    """Variant type breakdown across all candidates (the 'landscape')."""
+    if cohort.empty:
+        return pd.DataFrame()
+    counts = cohort["Variant Type"].value_counts()
+    rows = [{
+        "Variant Type": vt,
+        "Count": int(counts.get(vt, 0)),
+        "% of total": f"{100*counts.get(vt, 0)/len(cohort):.1f}",
+        "NMD-actionable?": "yes" if vt in NMD_ACTIONABLE else "no"
+    } for vt in counts.index]
+    return pd.DataFrame(rows)
+
+
+def cohort_summary(cohort: pd.DataFrame, fs_cohort: pd.DataFrame, n_input_samples: int) -> pd.DataFrame:
+    """Cohort-level aggregate counts for both the full landscape and the FS subset."""
     if cohort.empty:
         return pd.DataFrame([("No candidates", 0)], columns=["Metric", "Count"])
     rows = [
-        ("Total candidates",                  len(cohort)),
-        ("Samples with ≥1 candidate",         cohort["sample"].nunique()),
-        ("Samples with 0 candidates",         n_input_samples - cohort["sample"].nunique()),
-        ("Patients represented",              cohort["patient"].nunique()),
+        ("─── Input ───", ""),
+        ("Samples loaded",                        cohort["sample"].nunique()),
+        ("Samples with 0 candidates",             n_input_samples - cohort["sample"].nunique()),
+        ("Patients represented",                  cohort["patient"].nunique()),
+        ("Total candidates (all variant types)",  len(cohort)),
         ("", ""),
-        ("NMD-SENSITIVE",                     int((cohort["nmd_consensus"]=="SENSITIVE").sum())),
-        ("NMD-INSENSITIVE",                   int((cohort["nmd_consensus"]=="INSENSITIVE").sum())),
-        ("UNCERTAIN / UNKNOWN",               int(cohort["nmd_consensus"].isin(["UNCERTAIN","UNKNOWN"]).sum())),
-        ("NOT_APPLICABLE",                    int((cohort.get("nmd_rules", pd.Series())=="NOT_APPLICABLE").sum())),
+        ("─── NMD-actionable (frameshift only) ───", ""),
+        ("FS candidates",                         len(fs_cohort)),
+        ("FS samples with ≥1 candidate",          fs_cohort["sample"].nunique() if len(fs_cohort) else 0),
+        ("FS patients represented",               fs_cohort["patient"].nunique() if len(fs_cohort) else 0),
         ("", ""),
-        ("TIER1 (NMD-sensitive, IC50<50)",    int((cohort["priority_tier"]=="TIER1").sum())),
-        ("TIER2 (NMD-sensitive, IC50<500)",   int((cohort["priority_tier"]=="TIER2").sum())),
-        ("TIER3 controls (NMD-insensitive)",  int((cohort["priority_tier"]=="TIER3_control").sum())),
-        ("Unclassified",                      int((cohort["priority_tier"]=="UNCLASSIFIED").sum())),
+        ("NMD-SENSITIVE",                         int((fs_cohort["nmd_consensus"]=="SENSITIVE").sum())),
+        ("NMD-INSENSITIVE",                       int((fs_cohort["nmd_consensus"]=="INSENSITIVE").sum())),
+        ("UNCERTAIN / UNKNOWN",                   int(fs_cohort["nmd_consensus"].isin(["UNCERTAIN","UNKNOWN"]).sum())),
         ("", ""),
-        ("High confidence (3 — both agree)",  int((cohort["nmd_confidence_score"]==3).sum())),
-        ("Medium confidence (2 — single)",    int((cohort["nmd_confidence_score"]==2).sum())),
-        ("Low confidence (1 — disagree)",     int((cohort["nmd_confidence_score"]==1).sum())),
-        ("No data (0)",                       int((cohort["nmd_confidence_score"]==0).sum())),
+        ("TIER1 (NMD-sensitive, IC50<50)",        int((fs_cohort["priority_tier"]=="TIER1").sum())),
+        ("TIER2 (NMD-sensitive, IC50<500)",       int((fs_cohort["priority_tier"]=="TIER2").sum())),
+        ("TIER3 controls (NMD-insensitive)",      int((fs_cohort["priority_tier"]=="TIER3_control").sum())),
+        ("Unclassified",                          int((fs_cohort["priority_tier"]=="UNCLASSIFIED").sum())),
+        ("", ""),
+        ("High confidence (3 — both methods agree)", int((fs_cohort["nmd_confidence_score"]==3).sum())),
+        ("Medium confidence (2 — single method)",    int((fs_cohort["nmd_confidence_score"]==2).sum())),
+        ("Low confidence (1 — methods disagree)",    int((fs_cohort["nmd_confidence_score"]==1).sum())),
+        ("No data (0)",                              int((fs_cohort["nmd_confidence_score"]==0).sum())),
     ]
     return pd.DataFrame(rows, columns=["Metric", "Count"])
 
 
-def per_patient_paired(cohort: pd.DataFrame) -> pd.DataFrame:
-    """T vs M comparison per patient: counts of candidates and tiers."""
-    if cohort.empty:
+def per_patient_paired(fs_cohort: pd.DataFrame) -> pd.DataFrame:
+    """T vs M comparison per patient on FS-only cohort."""
+    if fs_cohort.empty:
         return pd.DataFrame()
     rows = []
-    for patient, sub in cohort.groupby("patient"):
+    for patient, sub in fs_cohort.groupby("patient"):
         prim  = sub[sub["timepoint"] == "primary"]
         recur = sub[sub["timepoint"] == "recurrent"]
         rows.append({
@@ -146,17 +174,38 @@ def per_patient_paired(cohort: pd.DataFrame) -> pd.DataFrame:
 
 # ═════════════════════════════════════════════════════════════════════════════
 # COHORT-SPECIFIC PLOTS
-# (per-sample plots are imported from nmd_scoring.py for visual consistency)
 # ═════════════════════════════════════════════════════════════════════════════
 
-COL_T = "#378ADD"  # primary
-COL_M = "#D85A30"  # recurrent
-
-def plot_tier_by_timepoint(cohort: pd.DataFrame) -> str:
-    """Stacked-grouped: TIER1/2/3 distribution split primary vs recurrent."""
+def plot_variant_landscape(cohort: pd.DataFrame) -> str:
+    """Bar chart of variant types across all candidates (the landscape)."""
     if cohort.empty:
         return ""
-    counts = (cohort.groupby(["timepoint","priority_tier"]).size()
+    counts = cohort["Variant Type"].value_counts()
+    fig, ax = plt.subplots(figsize=(7, 3.8))
+    colors = []
+    for v in counts.index:
+        if v == "FS": colors.append(COL_FS)
+        elif v == "missense": colors.append(COL_MIS)
+        else: colors.append(COL_INFRAME)
+    bars = ax.bar(range(len(counts)), counts.values, color=colors)
+    for i, (v, c) in enumerate(zip(counts.values, counts.index)):
+        pct = 100 * v / len(cohort)
+        ax.text(i, v + max(counts.values) * 0.02, f"{v}\n({pct:.1f}%)",
+                ha="center", va="bottom", fontsize=10)
+    ax.set_xticks(range(len(counts)))
+    ax.set_xticklabels(counts.index, fontsize=11)
+    ax.set_ylabel("Candidates")
+    ax.set_title(f"Variant landscape — {len(cohort)} candidates across cohort", fontsize=12)
+    ax.set_ylim(top=max(counts.values) * 1.18)
+    ax.spines[["top","right"]].set_visible(False)
+    fig.tight_layout()
+    return _b64fig(fig)
+
+
+def plot_tier_by_timepoint(fs_cohort: pd.DataFrame) -> str:
+    if fs_cohort.empty:
+        return ""
+    counts = (fs_cohort.groupby(["timepoint","priority_tier"]).size()
               .unstack(fill_value=0)
               .reindex(columns=["TIER1","TIER2","TIER3_control","UNCLASSIFIED"], fill_value=0))
     fig, ax = plt.subplots(figsize=(9, 4))
@@ -174,8 +223,8 @@ def plot_tier_by_timepoint(cohort: pd.DataFrame) -> str:
                         ha="center", fontsize=9)
     ax.set_xticks(list(x))
     ax.set_xticklabels(["TIER1","TIER2","TIER3 ctrl","Unclassified"], fontsize=10)
-    ax.set_ylabel("Candidates")
-    ax.set_title("Tier distribution: primary (T) vs recurrent (M)", fontsize=12)
+    ax.set_ylabel("Frameshift candidates")
+    ax.set_title("Tier distribution: primary (T) vs recurrent (M) — FS only", fontsize=12)
     ax.legend(fontsize=9)
     ax.spines[["top","right"]].set_visible(False)
     fig.tight_layout()
@@ -183,7 +232,6 @@ def plot_tier_by_timepoint(cohort: pd.DataFrame) -> str:
 
 
 def plot_paired(paired: pd.DataFrame) -> str:
-    """Per-patient TIER1 count: T vs M side-by-side bars."""
     if paired.empty:
         return ""
     fig, ax = plt.subplots(figsize=(11, 4.5))
@@ -195,7 +243,7 @@ def plot_paired(paired: pd.DataFrame) -> str:
     ax.set_xticklabels(paired["patient"], rotation=90, fontsize=8)
     ax.set_xlabel("Patient")
     ax.set_ylabel("TIER1 candidates")
-    ax.set_title("TIER1 NMD-sensitive neoantigens per patient: primary vs recurrent",
+    ax.set_title("TIER1 NMD-sensitive neoantigens per patient: primary vs recurrent (FS only)",
                  fontsize=12)
     ax.legend(fontsize=9)
     ax.spines[["top","right"]].set_visible(False)
@@ -203,52 +251,162 @@ def plot_paired(paired: pd.DataFrame) -> str:
     return _b64fig(fig)
 
 
-def plot_top_genes(cohort: pd.DataFrame, n: int = 20) -> str:
-    """Top genes producing TIER1 candidates (horizontal bar)."""
-    if cohort.empty:
+def plot_top_genes(fs_cohort: pd.DataFrame, n: int = 20) -> str:
+    if fs_cohort.empty:
         return ""
-    tier1 = cohort[cohort["priority_tier"] == "TIER1"]
+    tier1 = fs_cohort[fs_cohort["priority_tier"] == "TIER1"]
     if tier1.empty:
         return ""
     counts = tier1["Gene Name"].value_counts().head(n)
     fig, ax = plt.subplots(figsize=(8, max(3, 0.32 * len(counts))))
-    counts.iloc[::-1].plot(kind="barh", ax=ax, color="#F0C040")
+    counts.iloc[::-1].plot(kind="barh", ax=ax, color=COL_TIER1)
     for i, v in enumerate(counts.iloc[::-1]):
         ax.text(v + 0.05, i, str(int(v)), va="center", fontsize=9)
     ax.set_xlabel("TIER1 candidate count")
-    ax.set_title(f"Top {len(counts)} genes producing TIER1 candidates", fontsize=12)
+    ax.set_title(f"Top {len(counts)} genes producing TIER1 candidates (FS only)", fontsize=12)
     ax.spines[["top","right"]].set_visible(False)
     fig.tight_layout()
     return _b64fig(fig)
 
 
 # ═════════════════════════════════════════════════════════════════════════════
-# HTML REPORT
-# Mirrors the per-sample report style (CSS, sections, plot calls).
-# Inlines explanatory text equivalent to nmd_scoring.py's "What is this report?",
-# "NMD Scoring Methods", "Priority Tiers" blocks so a reader of the cohort
-# report alone has full context.
+# PER-SAMPLE WIDGET DATA (JSON-serialisable for embedding in HTML)
 # ═════════════════════════════════════════════════════════════════════════════
 
-CSS = ("*{box-sizing:border-box} body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',"
-       "sans-serif;font-size:14px;line-height:1.6;color:#1a1a1a;background:#fff;margin:0;padding:0}"
-       ".page{max-width:1200px;margin:0 auto;padding:40px 32px}"
-       "h1{font-size:24px;font-weight:500;margin-bottom:4px}"
-       "h2{font-size:17px;font-weight:500;border-bottom:1px solid #e0e0e0;padding-bottom:6px;margin:36px 0 8px}"
-       "h3{font-size:14px;font-weight:500;margin:16px 0 6px;color:#444}"
-       "p.sub{color:#666;font-size:13px;margin:0 0 16px;line-height:1.5}"
-       "table{border-collapse:collapse;width:100%;font-size:12px;margin-top:8px}"
-       "th{background:#f4f4f4;padding:6px 10px;text-align:left;font-weight:500;border-bottom:2px solid #ddd}"
-       "td{padding:6px 10px;border-bottom:1px solid #eee}"
-       ".card{background:#f8f8f8;border-radius:8px;padding:14px 18px;display:inline-block;min-width:140px;margin:4px}"
-       ".cv{font-size:22px;font-weight:500} .cl{font-size:11px;color:#777}"
-       ".note{background:#fffbe6;border-left:3px solid #f0c040;padding:10px 14px;margin:12px 0;font-size:13px;color:#555}")
+# Per-algorithm IC50 columns (pVACseq output column names)
+_ALGO_IC50_COLS = {
+    "MHCflurry":    "MHCflurry MT IC50 Score",
+    "MHCnuggetsI":  "MHCnuggetsI MT IC50 Score",
+    "NetMHC":       "NetMHC MT IC50 Score",
+    "NetMHCpan":    "NetMHCpan MT IC50 Score",
+    "PickPocket":   "PickPocket MT IC50 Score",
+    "SMM":          "SMM MT IC50 Score",
+    "SMMPMBEC":     "SMMPMBEC MT IC50 Score",
+}
 
 
-def _card(label, val, color=""):
-    style = "" if not color else f' style="color:{color}"'
+def _num(v):
+    """Coerce a TSV cell to float-or-None; tolerates NaN, empty, and 'NA'."""
+    try:
+        if pd.isna(v): return None
+        x = float(v)
+        return None if pd.isna(x) else round(x, 3)
+    except (TypeError, ValueError):
+        return None
+
+
+def _candidate_dict(r) -> dict:
+    """Convert one row of the per-sample TSV into a JS-friendly dict for the
+    interactive widget. Includes per-algorithm IC50 scores so the candidate
+    dropdown can compare what each binding predictor said."""
+    methods = {label: _num(r.get(col)) for label, col in _ALGO_IC50_COLS.items()}
+    return {
+        "gene":   str(r.get("Gene Name", "")),
+        "pep":    str(r.get("MT Epitope Seq", "")),
+        "hla":    str(r.get("hla_allele", "")),
+        "vtype":  str(r.get("Variant Type", "")),
+        "ic50":   _num(r.get("best_ic50")),
+        "median": _num(r.get("median_ic50")) if "median_ic50" in r else _num(r.get("Median MT IC50 Score")),
+        "method": str(r.get("best_ic50_method", "")),
+        "methods": methods,
+        "nmd":    str(r.get("nmd_consensus", "")),
+        "conf":   str(r.get("nmd_confidence", "")),
+        "tier":   str(r.get("priority_tier", "")),
+        "rule":   str(r.get("nmd_rule_explanation", "")),
+    }
+
+
+
+def build_sample_data(fs_cohort: pd.DataFrame) -> dict:
+    """Per-sample data for the interactive drill-down widget.
+    Filtered to FS only (NMD-actionable). Empty samples retained as empty dicts."""
+    out = {}
+    if fs_cohort.empty:
+        return out
+    for sample, sub in fs_cohort.groupby("sample"):
+        sub = sub.sort_values("best_ic50", na_position="last")
+        out[sample] = {
+            "patient":   sub["patient"].iloc[0],
+            "timepoint": sub["timepoint"].iloc[0],
+            "n_total":   int(len(sub)),
+            "tier1":     int((sub["priority_tier"] == "TIER1").sum()),
+            "tier2":     int((sub["priority_tier"] == "TIER2").sum()),
+            "tier3":     int((sub["priority_tier"] == "TIER3_control").sum()),
+            "unclass":   int((sub["priority_tier"] == "UNCLASSIFIED").sum()),
+            "sensitive": int((sub["nmd_consensus"] == "SENSITIVE").sum()),
+            "insensitive": int((sub["nmd_consensus"] == "INSENSITIVE").sum()),
+            "candidates": [_candidate_dict(r) for _, r in sub.iterrows()]
+        }
+    return out
+
+
+def build_patient_data(fs_cohort: pd.DataFrame) -> dict:
+    """Per-patient data for the interactive drill-down widget.
+    Each patient has T (primary) and M (recurrent) panels - either may be None
+    if that timepoint has no FS candidates. FS only (NMD-actionable)."""
+    out = {}
+    if fs_cohort.empty:
+        return out
+
+    def _panel(sub):
+        sub = sub.sort_values("best_ic50", na_position="last")
+        return {
+            "n_total":     int(len(sub)),
+            "tier1":       int((sub["priority_tier"] == "TIER1").sum()),
+            "tier2":       int((sub["priority_tier"] == "TIER2").sum()),
+            "tier3":       int((sub["priority_tier"] == "TIER3_control").sum()),
+            "unclass":     int((sub["priority_tier"] == "UNCLASSIFIED").sum()),
+            "sensitive":   int((sub["nmd_consensus"] == "SENSITIVE").sum()),
+            "insensitive": int((sub["nmd_consensus"] == "INSENSITIVE").sum()),
+            "candidates":  [_candidate_dict(r) for _, r in sub.iterrows()],
+        }
+
+    for patient, sub in fs_cohort.groupby("patient"):
+        t_sub = sub[sub["timepoint"] == "primary"]
+        m_sub = sub[sub["timepoint"] == "recurrent"]
+        out[str(patient)] = {
+            "patient": str(patient),
+            "T": _panel(t_sub) if len(t_sub) else None,
+            "M": _panel(m_sub) if len(m_sub) else None,
+        }
+    return out
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# HTML REPORT
+# ═════════════════════════════════════════════════════════════════════════════
+
+CSS = """
+*{box-sizing:border-box} body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:14px;line-height:1.6;color:#1a1a1a;background:#fff;margin:0;padding:0}
+.page{max-width:1200px;margin:0 auto;padding:40px 32px}
+h1{font-size:24px;font-weight:500;margin-bottom:4px}
+h2{font-size:17px;font-weight:500;border-bottom:1px solid #e0e0e0;padding-bottom:6px;margin:36px 0 8px}
+h3{font-size:14px;font-weight:500;margin:16px 0 6px;color:#444}
+p.sub{color:#666;font-size:13px;margin:0 0 16px;line-height:1.5}
+table{border-collapse:collapse;width:100%;font-size:12px;margin-top:8px}
+th{background:#f4f4f4;padding:6px 10px;text-align:left;font-weight:500;border-bottom:2px solid #ddd}
+td{padding:6px 10px;border-bottom:1px solid #eee}
+tr:hover td{background:#fafafa}
+.card{background:#f8f8f8;border-radius:8px;padding:14px 18px;display:inline-block;min-width:140px;margin:4px;vertical-align:top}
+.cv{font-size:22px;font-weight:500} .cl{font-size:11px;color:#777}
+.cs{font-size:11px;color:#999;margin-top:2px}
+.note{background:#fffbe6;border-left:3px solid #f0c040;padding:10px 14px;margin:12px 0;font-size:13px;color:#555}
+.intro-box{background:#f4f8fc;border-left:3px solid #378ADD;padding:14px 18px;margin:12px 0;font-size:13px;color:#444;line-height:1.6}
+.tier-block{background:#fafafa;padding:10px 14px;margin:8px 0;border-radius:4px;font-size:13px}
+.tier-1-h{color:#B8860B;font-weight:500}
+.tier-2-h{color:#C57A33;font-weight:500}
+.tier-3-h{color:#377AB8;font-weight:500}
+.widget{background:#fafafa;border:1px solid #e0e0e0;border-radius:8px;padding:18px 22px;margin:16px 0}
+.widget select{font-size:14px;padding:6px 10px;border:1px solid #ccc;border-radius:4px;background:#fff;font-family:inherit}
+.widget label{font-weight:500;margin-right:10px}
+.widget .meta{font-size:12px;color:#777;margin-top:4px}
+"""
+
+
+def _card(label, val, sub=""):
+    s = f'<div class="cs">{sub}</div>' if sub else ""
     return (f'<div class="card"><div class="cl">{label}</div>'
-            f'<div class="cv"{style}>{val}</div></div>')
+            f'<div class="cv">{val}</div>{s}</div>')
 
 
 def _tbl(df, cols, empty="No candidates."):
@@ -270,11 +428,308 @@ def _img(b64, caption):
             f'<p style="font-size:11px;color:#888;margin-top:6px;text-align:center;">{caption}</p></div>')
 
 
-def generate_report(cohort: pd.DataFrame, summary: pd.DataFrame, paired: pd.DataFrame,
-                    out_dir: Path, n_input_samples: int):
+METHODS_BLOCK = """
+<h2>NMD scoring methods</h2>
+<h3>Method 1 — VEP NMD plugin</h3>
+<p class="sub">
+  The VEP NMD plugin (Ensembl v105+) annotates truncating variants with
+  <code>NMD_escaping_variant</code> when the PTC is predicted to escape NMD. An empty
+  NMD field on a truncating variant means NMD is triggered (SENSITIVE).
+</p>
+
+<h3>Method 2 — Lindeboom rules (Nat Genet 2019)</h3>
+<p class="sub">Applied to frameshift and stop-gained variants. Rules in priority order:</p>
+<ul style="font-size:13px;color:#444;margin:0 0 12px 20px;line-height:1.8">
+  <li><strong>Rule 4 — Start-proximal PTC (&lt;150 nt):</strong> Pioneer round completes before NMD surveillance → INSENSITIVE</li>
+  <li><strong>Rule 1 — Last exon:</strong> No downstream EJC to trigger NMD → INSENSITIVE</li>
+  <li><strong>Rule 3 — Long exon (&gt;407 nt):</strong> EJC too far downstream → INSENSITIVE</li>
+  <li><strong>Rule 2 — 55 nt boundary:</strong> PTC &gt;55 nt upstream of last EJC → SENSITIVE (canonical NMD)</li>
+</ul>
+
+<h3>Ensemble confidence (0–3)</h3>
+<p class="sub">3 = both methods agree; 2 = single method available; 1 = methods disagree; 0 = no data.</p>
+
+<h2>Priority tiers</h2>
+<div class="tier-block"><span class="tier-1-h">TIER 1</span> — NMD-sensitive + IC50 &lt; 50 nM. Primary therapeutic targets — silenced by NMD, exposed by NMD inhibition.</div>
+<div class="tier-block"><span class="tier-2-h">TIER 2</span> — NMD-sensitive + IC50 50–500 nM. Moderate binders, potentially relevant after NMD inhibition.</div>
+<div class="tier-block"><span class="tier-3-h">TIER 3</span> — NMD-insensitive + IC50 &lt; 500 nM. Already expressed — controls for immune response without NMD inhibition.</div>
+"""
+
+
+WIDGET_HTML = """
+<h2>Per-patient drill-down (interactive)</h2>
+<p class="sub">
+  Select a patient to see their NMD-actionable (frameshift) candidates in both
+  primary (T) and recurrent (M) timepoints side by side. Then pick a candidate
+  in either panel to see how the 7 binding-prediction algorithms compare.
+  NetMHCpanEL is excluded because it reports an eluted-ligand probability rather than IC50.
+</p>
+<div class="widget">
+  <div style="display:flex;gap:14px;align-items:center;margin-bottom:14px;">
+    <label for="patient-select"><strong>Patient:</strong></label>
+    <select id="patient-select" style="min-width:240px;"></select>
+  </div>
+
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:18px;">
+    <div class="tp-panel" style="border:1px solid #e0e0e0;border-radius:6px;padding:14px;min-width:0;">
+      <h3 style="margin-top:0;margin-bottom:8px;color:#377AB8;border-bottom:2px solid #377AB8;padding-bottom:4px;">Primary (T)</h3>
+      <div class="meta" id="meta-T" style="font-size:12px;"></div>
+      <div id="bars-T" style="margin:8px 0;"></div>
+      <div style="margin-top:8px;">
+        <label for="cand-T" style="font-size:12px;">Candidate:</label><br>
+        <select id="cand-T" style="width:100%;margin-top:4px;"></select>
+      </div>
+      <div class="meta" id="cmeta-T" style="margin-top:10px;font-size:12px;"></div>
+      <div id="methods-T" style="margin-top:8px;"></div>
+    </div>
+    <div class="tp-panel" style="border:1px solid #e0e0e0;border-radius:6px;padding:14px;min-width:0;">
+      <h3 style="margin-top:0;margin-bottom:8px;color:#D85A30;border-bottom:2px solid #D85A30;padding-bottom:4px;">Recurrent (M)</h3>
+      <div class="meta" id="meta-M" style="font-size:12px;"></div>
+      <div id="bars-M" style="margin:8px 0;"></div>
+      <div style="margin-top:8px;">
+        <label for="cand-M" style="font-size:12px;">Candidate:</label><br>
+        <select id="cand-M" style="width:100%;margin-top:4px;"></select>
+      </div>
+      <div class="meta" id="cmeta-M" style="margin-top:10px;font-size:12px;"></div>
+      <div id="methods-M" style="margin-top:8px;"></div>
+    </div>
+  </div>
+
+  <h3 style="margin-top:24px;">All FS candidates for this patient (both timepoints)</h3>
+  <div id="patient-table" style="margin-top:6px;"></div>
+</div>
+<script>
+const PATIENT_DATA = __PATIENT_DATA__;
+const PATIENT_KEYS = Object.keys(PATIENT_DATA).sort((a,b) => parseInt(a) - parseInt(b));
+
+function svgBarV(items, w=380, h=180, yLabel='') {
+  const max = Math.max(1, ...items.map(x => x.value));
+  const padL = 50, padR = 12, padT = 16, padB = 36;
+  const innerW = w - padL - padR, innerH = h - padT - padB;
+  const barW = innerW / items.length - 10;
+  let svg = `<svg viewBox="0 0 ${w} ${h}" xmlns="http://www.w3.org/2000/svg" style="font-family:inherit;font-size:11px;max-width:100%;height:auto;">`;
+  svg += `<line x1="${padL}" y1="${padT}" x2="${padL}" y2="${h-padB}" stroke="#bbb"/>`;
+  svg += `<line x1="${padL}" y1="${h-padB}" x2="${w-padR}" y2="${h-padB}" stroke="#bbb"/>`;
+  for (let i=0; i<=4; i++) {
+    const y = h - padB - (i/4)*innerH;
+    const v = Math.round(max * i / 4 * 10) / 10;
+    svg += `<line x1="${padL-3}" y1="${y}" x2="${padL}" y2="${y}" stroke="#bbb"/>`;
+    svg += `<text x="${padL-6}" y="${y+3}" text-anchor="end" fill="#666">${v}</text>`;
+  }
+  items.forEach((it, i) => {
+    const bh = (it.value / max) * innerH;
+    const x = padL + i * (barW + 10) + 5;
+    const y = h - padB - bh;
+    svg += `<rect x="${x}" y="${y}" width="${barW}" height="${bh}" fill="${it.color}" rx="2"/>`;
+    if (it.value > 0) {
+      svg += `<text x="${x + barW/2}" y="${y - 4}" text-anchor="middle" fill="#333">${it.value}</text>`;
+    }
+    svg += `<text x="${x + barW/2}" y="${h - padB + 14}" text-anchor="middle" fill="#444">${it.label}</text>`;
+  });
+  svg += '</svg>';
+  return svg;
+}
+
+function svgBarH_log(items, w=480, h=240, xLabel='IC50 (nM, log scale)') {
+  const padL = 110, padR = 50, padT = 16, padB = 42;
+  const innerW = w - padL - padR;
+  const innerH = h - padT - padB;
+  const barH = Math.max(8, innerH / items.length - 6);
+
+  const vals = items.map(x => x.value).filter(v => v != null && v > 0);
+  if (vals.length === 0) {
+    return `<p style="color:#888;font-style:italic;">No IC50 values to display.</p>`;
+  }
+  const dataMin = Math.max(0.01, Math.min(...vals));
+  const dataMax = Math.max(...vals);
+  const lmin = Math.log10(dataMin * 0.7);
+  const lmax = Math.log10(Math.max(dataMax * 1.3, 1000));
+  const xScale = v => padL + (Math.log10(Math.max(0.01, v)) - lmin) / (lmax - lmin) * innerW;
+
+  let svg = `<svg viewBox="0 0 ${w} ${h}" xmlns="http://www.w3.org/2000/svg" style="font-family:inherit;font-size:10px;max-width:100%;height:auto;">`;
+  svg += `<line x1="${padL}" y1="${padT}" x2="${padL}" y2="${h-padB}" stroke="#bbb"/>`;
+  svg += `<line x1="${padL}" y1="${h-padB}" x2="${w-padR}" y2="${h-padB}" stroke="#bbb"/>`;
+
+  for (let log = Math.ceil(lmin); log <= Math.floor(lmax); log++) {
+    const v = Math.pow(10, log);
+    const x = xScale(v);
+    svg += `<line x1="${x}" y1="${h-padB}" x2="${x}" y2="${h-padB+3}" stroke="#bbb"/>`;
+    svg += `<text x="${x}" y="${h-padB+14}" text-anchor="middle" fill="#666">${v >= 1 ? v : v.toFixed(1)}</text>`;
+  }
+  svg += `<text x="${padL + innerW/2}" y="${h-4}" text-anchor="middle" fill="#666">${xLabel}</text>`;
+
+  if (Math.pow(10, lmin) <= 50 && 50 <= Math.pow(10, lmax)) {
+    const x = xScale(50);
+    svg += `<line x1="${x}" y1="${padT}" x2="${x}" y2="${h-padB}" stroke="#555" stroke-dasharray="3 3" stroke-width="0.8"/>`;
+    svg += `<text x="${x+3}" y="${padT+10}" font-size="9" fill="#555">50 nM</text>`;
+  }
+  if (Math.pow(10, lmin) <= 500 && 500 <= Math.pow(10, lmax)) {
+    const x = xScale(500);
+    svg += `<line x1="${x}" y1="${padT}" x2="${x}" y2="${h-padB}" stroke="#999" stroke-dasharray="2 4" stroke-width="0.8"/>`;
+    svg += `<text x="${x+3}" y="${padT+10}" font-size="9" fill="#999">500 nM</text>`;
+  }
+
+  items.forEach((it, i) => {
+    const yMid = padT + i * (innerH / items.length) + (innerH / items.length) / 2;
+    const yTop = yMid - barH/2;
+    if (it.value == null || it.value <= 0) {
+      svg += `<text x="${padL - 6}" y="${yMid+3}" text-anchor="end" fill="#444">${it.label}</text>`;
+      svg += `<text x="${padL + 4}" y="${yMid+3}" fill="#aaa" font-style="italic">no value</text>`;
+      return;
+    }
+    const xEnd = xScale(it.value);
+    svg += `<text x="${padL - 6}" y="${yMid+3}" text-anchor="end" fill="#444">${it.label}</text>`;
+    svg += `<rect x="${padL}" y="${yTop}" width="${xEnd - padL}" height="${barH}" fill="${it.color}" rx="2"/>`;
+    svg += `<text x="${xEnd + 4}" y="${yMid+3}" fill="#333">${it.value < 1 ? it.value.toFixed(2) : it.value.toFixed(1)}</text>`;
+  });
+
+  svg += '</svg>';
+  return svg;
+}
+
+function escapeHTML(s) {
+  return String(s).replace(/[&<>"']/g, m => ({
+    '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
+  }[m]));
+}
+
+function tierColor(t) {
+  return {TIER1:'#F0C040',TIER2:'#F5944D',TIER3_control:'#378ADD',UNCLASSIFIED:'#bbbbbb'}[t] || '#999';
+}
+
+function nmdColor(n) {
+  return {SENSITIVE:'#D85A30',INSENSITIVE:'#378ADD',UNCERTAIN:'#aaa',UNKNOWN:'#ccc'}[n] || '#999';
+}
+
+function renderTable(rows) {
+  if (!rows || !rows.length) return '<p style="color:#888;font-style:italic;">No frameshift candidates for this patient.</p>';
+  let html = '<table><thead><tr>'
+    + ['Timepoint','Gene','Peptide','HLA','best IC50','median','best method','NMD','tier','rule'].map(h => `<th>${h}</th>`).join('')
+    + '</tr></thead><tbody>';
+  for (const r of rows) {
+    const tierBadge = `<span style="display:inline-block;background:${tierColor(r.tier)};color:#fff;padding:2px 6px;border-radius:3px;font-size:11px;">${r.tier}</span>`;
+    const tpColor = r.tp === 'T' ? '#377AB8' : '#D85A30';
+    html += '<tr>'
+      + `<td><strong style="color:${tpColor};">${r.tp}</strong></td>`
+      + `<td>${escapeHTML(r.gene)}</td>`
+      + `<td><code>${escapeHTML(r.pep)}</code></td>`
+      + `<td>${escapeHTML(r.hla)}</td>`
+      + `<td>${r.ic50 == null ? '—' : r.ic50.toFixed(2)}</td>`
+      + `<td>${r.median == null ? '—' : r.median.toFixed(1)}</td>`
+      + `<td>${escapeHTML(r.method)}</td>`
+      + `<td style="color:${nmdColor(r.nmd)};">${escapeHTML(r.nmd)}</td>`
+      + `<td>${tierBadge}</td>`
+      + `<td style="font-size:11px;color:#666;">${escapeHTML(r.rule)}</td>`
+      + '</tr>';
+  }
+  html += '</tbody></table>';
+  return html;
+}
+
+const METHOD_ORDER = ['MHCflurry','MHCnuggetsI','NetMHC','NetMHCpan','PickPocket','SMM','SMMPMBEC'];
+
+function renderPanel(pid, tp) {
+  const d = PATIENT_DATA[pid];
+  const panel = d ? d[tp] : null;
+  const tpName = tp === 'T' ? 'primary' : 'recurrent';
+  const metaEl = document.getElementById('meta-' + tp);
+  const barsEl = document.getElementById('bars-' + tp);
+  const candSel = document.getElementById('cand-' + tp);
+  const cmetaEl = document.getElementById('cmeta-' + tp);
+  const methodsEl = document.getElementById('methods-' + tp);
+
+  candSel.innerHTML = '';
+  if (!panel) {
+    metaEl.innerHTML = `<em style="color:#aaa;">No FS candidates in ${tpName} timepoint.</em>`;
+    barsEl.innerHTML = '';
+    cmetaEl.innerHTML = '';
+    methodsEl.innerHTML = '';
+    candSel.disabled = true;
+    return;
+  }
+  candSel.disabled = false;
+  metaEl.innerHTML = `<strong>${panel.n_total}</strong> FS · `
+    + `<span style="color:#B8860B;">${panel.tier1} T1</span> · `
+    + `<span style="color:#C57A33;">${panel.tier2} T2</span> · `
+    + `<span style="color:#377AB8;">${panel.tier3} T3 ctrl</span> · `
+    + `<span style="color:#999;">${panel.unclass} unclass</span>`;
+  barsEl.innerHTML = svgBarV([
+    {label:'TIER1', value:panel.tier1, color:'#F0C040'},
+    {label:'TIER2', value:panel.tier2, color:'#F5944D'},
+    {label:'TIER3', value:panel.tier3, color:'#378ADD'},
+    {label:'Unclass', value:panel.unclass, color:'#bbbbbb'},
+  ]);
+
+  panel.candidates.forEach((c, i) => {
+    const opt = document.createElement('option');
+    opt.value = i;
+    opt.textContent = `${c.gene} · ${c.hla} · ${c.tier} · ${c.ic50 != null ? c.ic50.toFixed(2)+' nM' : '—'}`;
+    candSel.appendChild(opt);
+  });
+  if (panel.candidates.length) renderCandidate(pid, tp, 0);
+}
+
+function renderCandidate(pid, tp, idx) {
+  const d = PATIENT_DATA[pid];
+  const panel = d ? d[tp] : null;
+  if (!panel) return;
+  const c = panel.candidates[idx];
+  if (!c) return;
+  const cmetaEl = document.getElementById('cmeta-' + tp);
+  const methodsEl = document.getElementById('methods-' + tp);
+  const tierBadge = `<span style="display:inline-block;background:${tierColor(c.tier)};color:#fff;padding:2px 6px;border-radius:3px;">${c.tier}</span>`;
+  cmetaEl.innerHTML = `<strong>${c.gene}</strong> · <code>${c.pep}</code> · ${c.hla} · `
+    + `${c.vtype} · ${tierBadge}<br>`
+    + `NMD: <span style="color:${nmdColor(c.nmd)};">${c.nmd}</span> (${c.conf}) · `
+    + `best: ${c.method}@${c.ic50 != null ? c.ic50.toFixed(2) : '—'} nM · median ${c.median != null ? c.median.toFixed(1) : '—'} nM`;
+  if (c.rule) cmetaEl.innerHTML += `<br><span style="font-size:11px;color:#666;">${escapeHTML(c.rule)}</span>`;
+
+  const items = METHOD_ORDER.map(m => ({
+    label: m,
+    value: c.methods[m] != null ? c.methods[m] : null,
+    color: m === c.method ? '#D85A30' : '#378ADD'
+  }));
+  methodsEl.innerHTML = svgBarH_log(items);
+}
+
+function renderPatient(pid) {
+  const d = PATIENT_DATA[pid];
+  if (!d) return;
+  renderPanel(pid, 'T');
+  renderPanel(pid, 'M');
+  const allCands = [];
+  if (d.T) for (const c of d.T.candidates) allCands.push(Object.assign({}, c, {tp:'T'}));
+  if (d.M) for (const c of d.M.candidates) allCands.push(Object.assign({}, c, {tp:'M'}));
+  document.getElementById('patient-table').innerHTML = renderTable(allCands);
+}
+
+(function init() {
+  const sel = document.getElementById('patient-select');
+  for (const k of PATIENT_KEYS) {
+    const d = PATIENT_DATA[k];
+    const nT = d.T ? d.T.n_total : 0;
+    const nM = d.M ? d.M.n_total : 0;
+    const opt = document.createElement('option');
+    opt.value = k;
+    opt.textContent = `Patient ${k}  (T=${nT} · M=${nM} FS)`;
+    sel.appendChild(opt);
+  }
+  sel.addEventListener('change', e => renderPatient(e.target.value));
+  document.getElementById('cand-T').addEventListener('change', e =>
+    renderCandidate(sel.value, 'T', parseInt(e.target.value)));
+  document.getElementById('cand-M').addEventListener('change', e =>
+    renderCandidate(sel.value, 'M', parseInt(e.target.value)));
+  if (PATIENT_KEYS.length) renderPatient(PATIENT_KEYS[0]);
+})();
+</script>
+"""
+
+
+def generate_report(cohort: pd.DataFrame, fs_cohort: pd.DataFrame,
+                    summary: pd.DataFrame, paired: pd.DataFrame,
+                    landscape: pd.DataFrame, out_dir: Path, n_input_samples: int):
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    # If cohort is empty, write a stub
     if cohort.empty:
         (out_dir / "cohort_report.html").write_text(
             f"<!DOCTYPE html><html><head><style>{CSS}</style></head>"
@@ -284,47 +739,65 @@ def generate_report(cohort: pd.DataFrame, summary: pd.DataFrame, paired: pd.Data
         print("[REPORT] Cohort empty — wrote stub")
         return
 
-    # Generate plots (per-sample-style, applied to cohort)
-    img_tiers   = plot_tiers(cohort)
-    # IC50 scatter is one row per candidate; cap at top-50 to stay readable
-    top_for_ic50 = (cohort.sort_values("best_ic50").head(50)
-                    if "best_ic50" in cohort.columns else cohort.head(0))
-    img_ic50    = plot_ic50(top_for_ic50)
-    img_method  = plot_nmd_breakdown(cohort)
-    img_conf    = plot_confidence(cohort)
-    # Cohort-specific
-    img_t_v_m   = plot_tier_by_timepoint(cohort)
-    img_paired  = plot_paired(paired)
-    img_genes   = plot_top_genes(cohort)
+    # Static plots
+    img_landscape = plot_variant_landscape(cohort)
+    img_tiers     = plot_tiers(fs_cohort) if not fs_cohort.empty else ""
+    top_for_ic50  = (fs_cohort.sort_values("best_ic50").head(50)
+                     if "best_ic50" in fs_cohort.columns else fs_cohort.head(0))
+    img_ic50      = plot_ic50(top_for_ic50)
+    img_method    = plot_nmd_breakdown(fs_cohort) if not fs_cohort.empty else ""
+    img_conf      = plot_confidence(fs_cohort) if not fs_cohort.empty else ""
+    img_t_v_m     = plot_tier_by_timepoint(fs_cohort)
+    img_paired    = plot_paired(paired)
+    img_genes     = plot_top_genes(fs_cohort)
 
-    hla_df = hla_allele_breakdown(cohort)
+    hla_df = hla_allele_breakdown(fs_cohort) if not fs_cohort.empty else pd.DataFrame()
 
-    # Subsets for tables
-    t1 = cohort[cohort["priority_tier"] == "TIER1"]
-    t2 = cohort[cohort["priority_tier"] == "TIER2"]
-    t3 = cohort[cohort["priority_tier"] == "TIER3_control"]
-
-    # Show top 30 of each tier sorted by best_ic50 (ascending = strongest binders first)
-    if "best_ic50" in cohort.columns:
+    # Top tables (FS only)
+    t1 = fs_cohort[fs_cohort["priority_tier"] == "TIER1"]
+    t2 = fs_cohort[fs_cohort["priority_tier"] == "TIER2"]
+    t3 = fs_cohort[fs_cohort["priority_tier"] == "TIER3_control"]
+    if "best_ic50" in fs_cohort.columns:
         t1 = t1.sort_values("best_ic50").head(30)
         t2 = t2.sort_values("best_ic50").head(30)
         t3 = t3.sort_values("best_ic50").head(30)
 
-    COLS = ["sample","patient","timepoint","Gene Name","Variant Type","hla_allele",
+    COLS = ["sample","patient","timepoint","Gene Name","hla_allele",
             "MT Epitope Seq","best_ic50","best_ic50_method","nmd_consensus",
             "nmd_confidence","nmd_confidence_score","nmd_rule_explanation"]
-    COLS = [c for c in COLS if c in cohort.columns]
+    COLS = [c for c in COLS if c in fs_cohort.columns]
 
-    # Counters for headline cards
-    n_tot = len(cohort)
-    n_s   = int((cohort["nmd_consensus"]=="SENSITIVE").sum())
-    n_i   = int((cohort["nmd_consensus"]=="INSENSITIVE").sum())
-    n_u   = int(cohort["nmd_consensus"].isin(["UNCERTAIN","UNKNOWN"]).sum())
-    n_t1  = int((cohort["priority_tier"]=="TIER1").sum())
-    n_t2  = int((cohort["priority_tier"]=="TIER2").sum())
-    n_dis = int((cohort["nmd_confidence"]=="methods_disagree").sum())
-    n_pat = cohort["patient"].nunique()
-    n_smp = cohort["sample"].nunique()
+    # Cards
+    n_smp_loaded = cohort["sample"].nunique()
+    n_pat        = cohort["patient"].nunique()
+    n_total      = len(cohort)
+    n_fs         = len(fs_cohort)
+    n_t1         = int((fs_cohort["priority_tier"]=="TIER1").sum()) if not fs_cohort.empty else 0
+    n_t2         = int((fs_cohort["priority_tier"]=="TIER2").sum()) if not fs_cohort.empty else 0
+    n_s          = int((fs_cohort["nmd_consensus"]=="SENSITIVE").sum()) if not fs_cohort.empty else 0
+    n_i          = int((fs_cohort["nmd_consensus"]=="INSENSITIVE").sum()) if not fs_cohort.empty else 0
+    n_dis        = int((fs_cohort["nmd_confidence"]=="methods_disagree").sum()) if not fs_cohort.empty else 0
+    n_no_data    = int((fs_cohort["nmd_confidence"]=="no_data").sum()) if not fs_cohort.empty else 0
+    n_unclass    = int((fs_cohort["priority_tier"]=="UNCLASSIFIED").sum()) if not fs_cohort.empty else 0
+
+    n_total_pat = 28  # full cohort patient count from sample list (constant for this study)
+
+    # Per-patient T+M coverage (answers "why 27 patients but 49 samples":
+    # both timepoints have candidates for some patients, only one for others,
+    # neither for patient 5 who has very low purity in both samples).
+    if cohort.empty:
+        n_both = n_one = n_none = 0
+    else:
+        cov = cohort.groupby("patient")["timepoint"].nunique()
+        n_both = int((cov == 2).sum())
+        n_one  = int((cov == 1).sum())
+        n_none = int(n_total_pat - n_both - n_one)
+
+    def conf_cards():
+        return ('<div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:16px;">' +
+                "".join(f'<div class="card"><div class="cl">Score {s}</div>'
+                        f'<div class="cv">{int((fs_cohort["nmd_confidence_score"]==s).sum()) if not fs_cohort.empty else 0}</div></div>'
+                        for s in [3,2,1,0]) + "</div>")
 
     def hla_tbl():
         if hla_df is None or hla_df.empty:
@@ -337,11 +810,8 @@ def generate_report(cohort: pd.DataFrame, summary: pd.DataFrame, paired: pd.Data
             for _, r in hla_df.iterrows())
         return f"<table><thead><tr>{th}</tr></thead><tbody>{body}</tbody></table>"
 
-    def conf_cards():
-        return ('<div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:16px;">' +
-                "".join(f'<div class="card"><div class="cl">Score {s}</div>'
-                        f'<div class="cv">{int((cohort["nmd_confidence_score"]==s).sum())}</div></div>'
-                        for s in [3,2,1,0]) + "</div>")
+    patient_data_json = json.dumps(build_patient_data(fs_cohort), separators=(",",":"))
+    widget_block = WIDGET_HTML.replace("__PATIENT_DATA__", patient_data_json)
 
     html = f"""<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
 <title>GBM NMD Cohort Report</title><style>{CSS}</style></head>
@@ -352,96 +822,98 @@ def generate_report(cohort: pd.DataFrame, summary: pd.DataFrame, paired: pd.Data
   GBM NMD-Neoantigen Pipeline &middot; github.com/paleslui/gbm-nmd-pipeline
 </p>
 
-<h2>What is this report?</h2>
-<p class="sub">
-  Aggregates per-sample NMD scoring results across the whole cohort.
-  Each pVACseq neoantigen candidate has been classified by NMD sensitivity using an
-  ensemble of two methods (VEP NMD plugin + Lindeboom et al. 2019 rules).
-  The core hypothesis is that TMZ-induced frameshift mutations create PTCs silenced by NMD —
-  NMD inhibition could expose these neoantigens to immune recognition. This report
-  compares primary (T) and recurrent (M) tumours per patient and identifies the
-  highest-priority candidates across the cohort.
-</p>
+<div class="intro-box">
+  This report summarises NMD-actionable neoantigen candidates across the cohort.
+  The hypothesis is that TMZ-induced frameshift mutations create premature
+  termination codons (PTCs) that are silenced by nonsense-mediated mRNA decay
+  (NMD); inhibiting NMD could expose these neoantigens to immune recognition.
+  Frameshift variants are the only neoantigen class that creates novel
+  peptides actionable by NMD inhibition; missense variants are not NMD-relevant
+  and stop-gained variants do not produce peptide neoantigens. The variant
+  landscape below is shown for context, but the rest of this report focuses
+  exclusively on frameshift-derived candidates.
+</div>
+
+{METHODS_BLOCK}
 
 <h2>Cohort overview</h2>
-{_card("Samples (loaded)", n_smp)}
-{_card("Samples (input)", n_input_samples)}
-{_card("Patients", n_pat)}
-{_card("Total candidates", n_tot)}
-{_card("NMD-sensitive", n_s, COL_S)}
-{_card("NMD-insensitive", n_i, COL_I)}
-{_card("Uncertain / N/A", n_u, COL_U)}
-{_card("Tier 1", n_t1)}
-{_card("Tier 2", n_t2)}
-{_card("Methods disagree", n_dis)}
+{_card("Samples", f"{n_smp_loaded}/{n_input_samples}", "≥1 candidate")}
+{_card("Patients", f"{n_pat}/{n_total_pat}", "≥1 candidate")}
+{_card("Patient T+M", f"{n_both}/{n_one}/{n_none}", "both / one only / neither")}
+{_card("Total candidates", n_total, "all variant types")}
+{_card("FS candidates", n_fs, "NMD-actionable")}
+{_card("TIER 1", n_t1, "FS, IC50&lt;50 nM")}
+{_card("TIER 2", n_t2)}
+{_card("NMD-sensitive", n_s, "FS only")}
+{_card("NMD-insensitive", n_i, "FS only")}
+{_card("Unclassified", n_unclass, f"{n_no_data} no data · {n_dis} methods disagree")}
+<p class="sub" style="margin-top:14px;">
+  Note on samples vs patients: the cohort contains paired primary (T) and recurrent (M) samples,
+  so {n_total_pat} patients = {n_total_pat*2} samples. Of the {n_input_samples - n_smp_loaded} samples with 0 candidates,
+  most are paired with a non-empty timepoint in the same patient (so the patient still counts as represented).
+  Only when both T and M timepoints are empty does a patient drop out of the cohort entirely.
+</p>
+
+<h2>Variant landscape — input candidates by type</h2>
+<p class="sub">
+  Distribution of all <strong>{n_total}</strong> pVACseq candidates across the cohort.
+  Frameshift (FS) is the only NMD-actionable variant type for neoantigen-based
+  immunotherapy. The remaining sections of this report show NMD analysis on the
+  <strong>{n_fs} FS candidates</strong> only.
+</p>
+{_img(img_landscape, f"Fig 1. Variant type distribution. Of {n_total} candidates, {n_fs} are frameshift (NMD-actionable).")}
+{_tbl(landscape, list(landscape.columns), "No variant data.")}
+<div class="note">
+  <strong>Why we focus on frameshift only:</strong>
+  <em>Missense</em> variants are not NMD-relevant (they replace one amino acid without
+  introducing a PTC). <em>Stop-gained</em> variants are NMD-relevant but truncate
+  the protein without generating novel peptide sequences — pVACseq does not
+  emit peptide candidates for them, so they are not actionable for neoantigen
+  vaccines. <em>Inframe</em> indels do not introduce PTCs.
+</div>
 
 <h2>Cohort summary table</h2>
 {_tbl(summary, list(summary.columns), "Empty cohort")}
 
-<h2>Tier distribution (cohort-wide)</h2>
-{_img(img_tiers, "Fig 1. Cohort-wide candidate counts by priority tier.")}
+<h2>Tier distribution (FS only)</h2>
+{_img(img_tiers, "Fig 2. Cohort-wide candidate counts by priority tier (frameshift only).")}
 
 <h2>Tier distribution: primary (T) vs recurrent (M)</h2>
-{_img(img_t_v_m, "Fig 2. Tier counts split by timepoint. Recurrent enrichment of TIER1 candidates is the core thesis hypothesis.")}
+{_img(img_t_v_m, "Fig 3. Tier counts split by timepoint. Recurrent enrichment of TIER1 candidates is the core thesis hypothesis.")}
 
 <h2>Per-patient paired comparison</h2>
-{_img(img_paired, "Fig 3. TIER1 candidate count per patient, primary vs recurrent. Sorted by ΔTIER1 (recurrent - primary), patients gaining the most from T→M first.")}
+{_img(img_paired, "Fig 4. TIER1 candidate count per patient, primary vs recurrent. Sorted by ΔTIER1 (recurrent − primary), patients gaining the most from T→M first.")}
 <p class="sub">Per-patient counts (sorted by ΔTIER1, then ΔTotal):</p>
 {_tbl(paired, list(paired.columns), "No paired data.")}
 
-<h2>IC50 distribution by NMD class — top 50 strongest binders</h2>
-{_img(img_ic50, "Fig 4. Top 50 candidates across the cohort, sorted by best IC50, colored by NMD consensus.")}
+{widget_block}
+
+<h2>IC50 distribution by NMD class — top 50 strongest binders (FS only)</h2>
+{_img(img_ic50, "Fig 5. Top 50 frameshift candidates across the cohort, sorted by best IC50, colored by NMD consensus.")}
 
 <h2>Top genes producing TIER1 candidates</h2>
-{_img(img_genes, "Fig 5. Genes contributing the most TIER1 candidates across the cohort.")}
+{_img(img_genes, "Fig 6. Genes contributing the most TIER1 candidates across the cohort (frameshift only).")}
 
-<h2>Per-HLA allele breakdown</h2>
+<h2>Per-HLA allele breakdown (Tier 1 + Tier 2)</h2>
 <p class="sub">Tier 1 and Tier 2 candidates across HLA alleles. Alleles with multiple
 high-confidence binders are the strongest therapeutic targets.</p>
 {hla_tbl()}
 
-<h2>NMD classification per method (cohort-wide)</h2>
-{_img(img_method, "Fig 6. Cohort-wide NMD classification per scoring method.")}
+<h2>NMD classification per method (cohort-wide, FS only)</h2>
+{_img(img_method, "Fig 7. Cohort-wide NMD classification per scoring method.")}
 
-<h2>Confidence score distribution (cohort-wide)</h2>
-{_img(img_conf, "Fig 7. Cohort-wide ensemble confidence distribution.")}
+<h2>Confidence score distribution (cohort-wide, FS only)</h2>
+{_img(img_conf, "Fig 8. Cohort-wide ensemble confidence distribution.")}
 <p class="sub">Score 3 = both methods agree; 2 = single method; 1 = disagree; 0 = no data.</p>
 {conf_cards()}
 
-<h2>NMD scoring methods</h2>
-<h3>Method 1 — VEP NMD plugin</h3>
-<p class="sub">
-  The VEP NMD plugin (Ensembl v105+) annotates truncating variants with
-  <code>NMD_escaping_variant</code> when the PTC is predicted to escape NMD. An empty
-  NMD field on a truncating variant means NMD is triggered (SENSITIVE).
-</p>
-
-<h3>Method 2 — Lindeboom rules (Nat Cell Biol 2019)</h3>
-<p class="sub">Applied to frameshift and stop-gained variants. Rules in priority order:</p>
-<ul style="font-size:13px;color:#444;margin:0 0 12px 20px;line-height:1.8">
-  <li><strong>Rule 4 — Start-proximal PTC (&lt;150nt):</strong> Pioneer round completes before NMD surveillance → INSENSITIVE</li>
-  <li><strong>Rule 1 — Last exon:</strong> No downstream EJC to trigger NMD → INSENSITIVE</li>
-  <li><strong>Rule 3 — Long exon (&gt;407nt):</strong> EJC too far downstream → INSENSITIVE</li>
-  <li><strong>Rule 2 — 55nt boundary:</strong> PTC &gt;55nt upstream of last EJC → SENSITIVE (canonical NMD)</li>
-</ul>
-<div class="note">⚠ NMD rules only apply to truncating mutations. Missense variants
-(NOT_APPLICABLE) are not subject to NMD but remain immunogenic neoantigen candidates.</div>
-
-<h2>Priority tiers</h2>
-<ul style="font-size:13px;color:#444;margin:0 0 12px 20px;line-height:1.8">
-  <li><strong>Tier 1 — NMD-sensitive + IC50 &lt;50 nM:</strong> Primary therapeutic targets — NMD inhibition could expose these neoantigens.</li>
-  <li><strong>Tier 2 — NMD-sensitive + IC50 50–500 nM:</strong> Moderate binders, potentially relevant after NMD inhibition.</li>
-  <li><strong>Tier 3 — NMD-insensitive + IC50 &lt;500 nM:</strong> Already translated — controls for immune response without NMD inhibition.</li>
-  <li><strong>Unclassified:</strong> Missense variants or insufficient transcript information.</li>
-</ul>
-
-<h2>Tier 1 — NMD-sensitive + IC50 &lt;50 nM (top 30 across cohort by IC50)</h2>
+<h2>TIER 1 — NMD-sensitive + IC50 &lt; 50 nM (top 30 across cohort by IC50)</h2>
 {_tbl(t1, COLS, "No Tier 1 candidates in this cohort.")}
 
-<h2>Tier 2 — NMD-sensitive + IC50 50–500 nM (top 30 across cohort by IC50)</h2>
+<h2>TIER 2 — NMD-sensitive + IC50 50–500 nM (top 30 across cohort by IC50)</h2>
 {_tbl(t2, COLS, "No Tier 2 candidates in this cohort.")}
 
-<h2>Tier 3 — NMD-insensitive controls (top 30 across cohort by IC50)</h2>
+<h2>TIER 3 — NMD-insensitive controls (top 30 across cohort by IC50)</h2>
 {_tbl(t3, COLS, "No Tier 3 candidates in this cohort.")}
 
 </div></body></html>"""
@@ -469,18 +941,25 @@ def main():
     print(f"[INFO] Reading per-sample dirs from: {args.input_dir}")
 
     n_input_samples = sum(1 for p in args.input_dir.iterdir() if p.is_dir() and SAMPLE_RE.match(p.name))
-    cohort  = load_cohort(args.input_dir)
-    summary = cohort_summary(cohort, n_input_samples)
-    paired  = per_patient_paired(cohort)
+    cohort = load_cohort(args.input_dir)
+
+    fs_cohort = cohort[cohort["Variant Type"] == "FS"].copy() if not cohort.empty else cohort
+    print(f"[INFO] Filtered to FS-only: {len(fs_cohort)} candidates from {fs_cohort['sample'].nunique() if not fs_cohort.empty else 0} samples")
+
+    landscape = variant_landscape(cohort)
+    summary   = cohort_summary(cohort, fs_cohort, n_input_samples)
+    paired    = per_patient_paired(fs_cohort)
 
     if not cohort.empty:
         cohort.to_csv(args.out_dir / "cohort_candidates.tsv", sep="\t", index=False)
-        cohort[cohort["priority_tier"]=="TIER1"].to_csv(
-            args.out_dir / "cohort_tier1.tsv", sep="\t", index=False)
-    summary.to_csv(args.out_dir / "cohort_summary.tsv", sep="\t", index=False)
-    paired.to_csv (args.out_dir / "cohort_paired.tsv",  sep="\t", index=False)
+        if not fs_cohort.empty:
+            fs_cohort[fs_cohort["priority_tier"]=="TIER1"].to_csv(
+                args.out_dir / "cohort_tier1.tsv", sep="\t", index=False)
+    summary.to_csv  (args.out_dir / "cohort_summary.tsv",  sep="\t", index=False)
+    paired.to_csv   (args.out_dir / "cohort_paired.tsv",   sep="\t", index=False)
+    landscape.to_csv(args.out_dir / "cohort_landscape.tsv", sep="\t", index=False)
 
-    generate_report(cohort, summary, paired, args.out_dir, n_input_samples)
+    generate_report(cohort, fs_cohort, summary, paired, landscape, args.out_dir, n_input_samples)
 
     print(f"\n{'='*60}\n  Cohort summary done. Output: {args.out_dir.resolve()}\n{'='*60}\n")
 
