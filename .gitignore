@@ -58,3 +58,9 @@ validation_archive/
 pipeline/slurm/slurm_pvacseq_array.sh
 pipeline/slurm/launch_pvacseq_array.sh
 pipeline/slurm/test_one_pvacseq.sh
+
+# Reproducibility test outputs (preserved baselines, regenerable, multi-GB)
+reproducibility_baseline/
+
+# VEP_plugins is pre-populated by setup.sh STEP 1c (cluster portability fix)
+resources/VEP_plugins/

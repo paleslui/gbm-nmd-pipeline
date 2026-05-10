@@ -40,7 +40,9 @@ ERRORS=0
 [ ! -f "$HLA_CSV" ]     && echo "[ERROR] HLA CSV not found: $HLA_CSV"         && ERRORS=$((ERRORS+1))
 [ ! -f "$FASTA" ]       && echo "[ERROR] Reference not found: $FASTA"         && ERRORS=$((ERRORS+1))
 # IEDB is downloaded automatically by the Nextflow pipeline on first run
-[ ! -d "$VEP_PLUGINS" ] && echo "[ERROR] VEP plugins not found: $VEP_PLUGINS" && ERRORS=$((ERRORS+1))
+# VEP plugins: not required at setup time - Nextflow downloads them on first run.
+# Create an empty dir so the pipeline can write into it.
+mkdir -p "$VEP_PLUGINS"
 
 if [ $ERRORS -gt 0 ]; then
     echo "[ERROR] $ERRORS missing path(s). Fix config.sh and rerun."
@@ -65,6 +67,41 @@ source $BASE/config.sh
 export NXF_HOME=$BASE/.nextflow
 export PYTHONUSERBASE=$BASE/.local
 echo "[OK] Environment variables configured"
+
+# ── Step 1c: Pre-populate VEP_plugins ─────────────────────────────────────────
+# The Nextflow DOWNLOAD_VEP_PLUGINS task uses 'git clone' which can fail on
+# compute nodes due to LD_LIBRARY_PATH inheritance from conda envs causing
+# OpenSSL/Kerberos library symbol conflicts. Pre-downloading here (before any
+# conda activation) avoids the issue. The Nextflow workflow detects the
+# populated directory and skips the download step.
+echo ""
+echo "[STEP 1c] Pre-populating VEP_plugins (avoids compute-node git lib conflicts)..."
+if [ -d "$VEP_PLUGINS" ] && [ "$(ls -A $VEP_PLUGINS 2>/dev/null)" ]; then
+    echo "[OK] VEP_plugins already populated"
+else
+    PVACSEQ_VERSION=4.0.7
+    rm -rf "$VEP_PLUGINS"
+    mkdir -p "$VEP_PLUGINS"
+    pushd "$VEP_PLUGINS" > /dev/null
+    # Use system git/wget/unzip; ensure no conda LD_LIBRARY_PATH interferes
+    SAVED_LD_LIBRARY_PATH=${LD_LIBRARY_PATH:-}
+    unset LD_LIBRARY_PATH
+    echo "[INFO] Cloning Ensembl/VEP_plugins..."
+    git clone --depth=1 https://github.com/Ensembl/VEP_plugins.git tmp_clone
+    mv tmp_clone/* tmp_clone/.git* . 2>/dev/null || true
+    mv tmp_clone/* . 2>/dev/null || true
+    rm -rf tmp_clone
+    echo "[INFO] Downloading pVACtools v${PVACSEQ_VERSION} for additional plugins..."
+    wget -q "https://github.com/griffithlab/pVACtools/archive/refs/tags/v${PVACSEQ_VERSION}.zip"
+    unzip -q "v${PVACSEQ_VERSION}.zip" "pVACtools-${PVACSEQ_VERSION}/pvactools/tools/pvacseq/VEP_plugins/*"
+    mv "pVACtools-${PVACSEQ_VERSION}/pvactools/tools/pvacseq/VEP_plugins/"* . 2>/dev/null || true
+    rm -rf "pVACtools-${PVACSEQ_VERSION}" "v${PVACSEQ_VERSION}.zip"
+    export LD_LIBRARY_PATH=$SAVED_LD_LIBRARY_PATH
+    popd > /dev/null
+    N_PLUGINS=$(ls "$VEP_PLUGINS" | wc -l)
+    echo "[OK] VEP_plugins populated with $N_PLUGINS files"
+fi
+
 # ── Step 2: Install miniforge ─────────────────────────────────────────────────
 echo ""
 echo "[STEP 2] Installing miniforge..."
@@ -98,7 +135,7 @@ else
     echo "[INFO] Building nf_pvacseq env with mamba (Nextflow + Java)..."
     mamba create -y -p $NF_ENV_PATH \
         -c conda-forge -c bioconda \
-        nextflow=25.10.* openjdk python=3.11 samtools
+        nextflow=25.10.* openjdk python=3.11 samtools pandas matplotlib seaborn cyvcf2
     echo "[OK] nf_pvacseq environment created"
 fi
 

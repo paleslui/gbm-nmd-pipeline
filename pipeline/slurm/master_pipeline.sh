@@ -17,9 +17,10 @@
 # Submits three SLURM jobs in sequence using afterok dependencies.
 # Usage: sbatch master_pipeline.sh
 #
-#   Job 1: gbm-analysis  — Stages 1-4: mutation landscape (gbm_analysis.py)
-#   Job 2: gbm-nextflow  — Stages 5-6: VEP annotation + pVACseq
-#   Job 3: gbm-nmd       — Stage 7:    NMD sensitivity scoring
+# Output structure (all in $RESULTS/run_${RUN_TS}/):
+#   1_gbm_analysis/   Stage 1: mutation landscape (gbm_analysis.py)
+#   2_pvacseq/        Stage 2: VEP + pVACseq filtered Nextflow run
+#   3_nmd_analysis/   Stage 3: per-sample NMD scoring + cohort summary
 # =============================================================================
 
 set -euo pipefail
@@ -28,20 +29,22 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source __BASE__/config.sh
 
 RUN_TS=$(date '+%Y%m%d_%H%M%S')
+RUN_DIR=$RESULTS/run_${RUN_TS}
 
 echo "============================================================"
 echo "  GBM NMD-Neoantigen Pipeline"
 echo "  Run timestamp: ${RUN_TS}"
-echo "  Base directory: ${BASE}"
+echo "  Run dir:       ${RUN_DIR}"
+echo "  Base:          ${BASE}"
 echo "============================================================"
 
-mkdir -p $LOGS
+mkdir -p $LOGS $RUN_DIR
 
 JOB1=$(sbatch \
     --partition=$SLURM_PARTITION \
     --constraint=$SLURM_CONSTRAINT \
     --mail-user=$SLURM_MAIL \
-    --export=ALL,RUN_TS=${RUN_TS} \
+    --export=ALL,RUN_TS=${RUN_TS},RUN_DIR=${RUN_DIR} \
     --parsable \
     ${SLURM_SCRIPTS}/slurm_python.sh)
 echo "[SUBMITTED] Job 1 (gbm-analysis):  SLURM job ${JOB1}"
@@ -51,9 +54,9 @@ JOB2=$(sbatch \
     --constraint=$SLURM_CONSTRAINT \
     --mail-user=$SLURM_MAIL \
     --dependency=afterok:${JOB1} \
-    --export=ALL,RUN_TS=${RUN_TS} \
+    --export=ALL,RUN_TS=${RUN_TS},RUN_DIR=${RUN_DIR} \
     --parsable \
-    ${SLURM_SCRIPTS}/slurm_pvacseq.sh)
+    ${SLURM_SCRIPTS}/slurm_pvacseq_filtered.sh)
 echo "[SUBMITTED] Job 2 (gbm-nextflow):  SLURM job ${JOB2} (depends on ${JOB1})"
 
 JOB3=$(sbatch \
@@ -61,7 +64,7 @@ JOB3=$(sbatch \
     --constraint=$SLURM_CONSTRAINT \
     --mail-user=$SLURM_MAIL \
     --dependency=afterok:${JOB2} \
-    --export=ALL,RUN_TS=${RUN_TS} \
+    --export=ALL,RUN_TS=${RUN_TS},RUN_DIR=${RUN_DIR} \
     --parsable \
     ${SLURM_SCRIPTS}/slurm_nmd.sh)
 echo "[SUBMITTED] Job 3 (gbm-nmd):       SLURM job ${JOB3} (depends on ${JOB2})"
@@ -69,9 +72,9 @@ echo "[SUBMITTED] Job 3 (gbm-nmd):       SLURM job ${JOB3} (depends on ${JOB2})"
 echo ""
 echo "============================================================"
 echo "  Pipeline queued. Monitor: watch -n 30 'squeue -u $USER'"
-echo "  Outputs:"
-echo "    Stages 1-4: $RESULTS/gbm_analysis_${RUN_TS}/"
-echo "    Stages 5-6: $RESULTS/nextflow_${RUN_TS}/"
-echo "    Stage 7:    $RESULTS/nmd_scoring_*_${RUN_TS}/"
-echo "    Logs:       $LOGS/"
+echo "  Outputs all under: ${RUN_DIR}/"
+echo "    Stage 1: ${RUN_DIR}/1_gbm_analysis/"
+echo "    Stage 2: ${RUN_DIR}/2_pvacseq/"
+echo "    Stage 3: ${RUN_DIR}/3_nmd_analysis/"
+echo "  Logs:    $LOGS/"
 echo "============================================================"

@@ -638,8 +638,9 @@ def main():
     args = parser.parse_args()
 
     vcf_dir  = Path(args.vcf_dir)
+    # Output directly to --out_dir (master_pipeline.sh provides run_<TS> at the parent level)
     run_ts   = datetime.now().strftime("%Y%m%d_%H%M%S")
-    out_dir  = Path(args.out_dir) / f"run_{run_ts}"
+    out_dir  = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     fasta    = Path(args.fasta) if args.fasta else vcf_dir.parent / "reference" / "GRCh38.primary_assembly.fa"
 
