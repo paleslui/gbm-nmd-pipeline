@@ -24,6 +24,22 @@ module load lsfm-init-miniconda/1.0.0
 source __BASE__/miniforge3/etc/profile.d/conda.sh
 conda activate __BASE__/conda_envs/nf_pvacseq
 
+# ── level-3 reproducibility fix: never trust bare `python` on the compute node.
+#    `module load lsfm-init-miniconda/1.0.0` puts the cluster miniconda3-4.12.0
+#    (Python 3.9, no scipy) on PATH; if `conda activate` silently fails, bare
+#    `python` falls through to it. Hard-fail on bad activation, smoke-test the
+#    critical imports, and always call the interpreter by absolute path. Do NOT
+#    revert. See slurm_python.sh for the full rationale.
+if [ -z "${CONDA_PREFIX:-}" ] || [ ! -x "$CONDA_PREFIX/bin/python" ]; then
+    echo "[ERROR] CONDA_PREFIX not set or python missing — env activation failed" >&2
+    exit 1
+fi
+echo "[INFO] Using python: $CONDA_PREFIX/bin/python"
+$CONDA_PREFIX/bin/python -c "import scipy, pandas, numpy, matplotlib, seaborn, cyvcf2" 2>&1 || {
+    echo "[ERROR] Critical Python imports failed — nf_pvacseq env is broken" >&2
+    exit 1
+}
+
 # Defaults if run standalone
 RUN_TS=${RUN_TS:-$(date '+%Y%m%d_%H%M%S')}
 RUN_DIR=${RUN_DIR:-$RESULTS/run_${RUN_TS}}
@@ -69,23 +85,28 @@ for TSV in $FILTERED_TSVS; do
     mkdir -p $OUT_DIR
 
     if [ -n "$VEP_VCF" ]; then
-        python $PIPELINE/nmd_scoring.py \
+        $CONDA_PREFIX/bin/python $PIPELINE/nmd_scoring.py \
             --pvacseq_tsv $TSV \
             --vep_vcf $VEP_VCF \
-            --out_dir $OUT_DIR
+            --out_dir $OUT_DIR || { echo "[ERROR] nmd_scoring.py failed for ${SAMPLE}" >&2; exit 1; }
     else
-        python $PIPELINE/nmd_scoring.py \
+        $CONDA_PREFIX/bin/python $PIPELINE/nmd_scoring.py \
             --pvacseq_tsv $TSV \
-            --out_dir $OUT_DIR
+            --out_dir $OUT_DIR || { echo "[ERROR] nmd_scoring.py failed for ${SAMPLE}" >&2; exit 1; }
     fi
 done
 
 # ── Cohort summary ──────────────────────────────────────────────────────────
 echo "[INFO] Generating cohort-level summary report..."
 mkdir -p $COHORT_DIR
-python $PIPELINE/nmd_cohort_summary.py \
+$CONDA_PREFIX/bin/python $PIPELINE/nmd_cohort_summary.py \
     --input_dir $PER_SAMPLE_DIR \
-    --out_dir $COHORT_DIR
+    --out_dir $COHORT_DIR \
+    --stage1_summary $RUN_DIR/1_gbm_analysis/sample_mutation_summary.tsv \
+    --paired_overlap $RUN_DIR/1_gbm_analysis/paired_variant_overlap.tsv || {
+    echo "[ERROR] Stage 3 nmd_cohort_summary.py FAILED — aborting" >&2
+    exit 1
+}
 
 echo "[INFO] Cohort report: $COHORT_DIR/cohort_report.html"
 echo "[DONE] Stage 3 (NMD scoring): $(date)"

@@ -1,16 +1,38 @@
 #!/usr/bin/env python3
 """
-nmd_scoring.py — GBM Pipeline Stage 7: NMD Sensitivity Scoring
+nmd_scoring.py — GBM Pipeline Stage 3: per-sample NMD Sensitivity Scoring
 Part of the GBM NMD-Neoantigen Pipeline.
 https://github.com/paleslui/gbm-nmd-pipeline
 
-Scores each pVACseq neoantigen candidate for NMD sensitivity using:
-  1. VEP NMD plugin (CSQ field) — requires Dragen VEP-annotated VCF
+Scores each pVACseq neoantigen candidate for NMD sensitivity using an ensemble
+of two methods:
+  1. VEP NMD plugin (CSQ field) — requires Dragen/VEP-annotated VCF
   2. Lindeboom et al. 2019 rule-based method (4 rules)
 
-Ensemble confidence 0-3: 3=both agree, 2=single method, 1=disagree, 0=no data
+Ensemble confidence 0-3: 3=both agree, 2=single method, 1=disagree, 0=no data.
+This per-sample scorer runs once per sample in Stage 3; its outputs are
+aggregated across the cohort by nmd_cohort_summary.py.
 
-Usage:
+INPUTS
+------
+  --pvacseq_tsv   pVACseq neoantigen candidates for one sample, e.g.
+                  2_pvacseq/pvactools/<sample>/MHC_Class_I/<sample>.filtered.tsv
+                  (required — one neoantigen candidate per row)
+  --vep_vcf       VEP-annotated VCF (optionally gzipped) for the same sample,
+                  used to read the NMD plugin field from the CSQ annotation.
+                  Optional — scoring falls back to Lindeboom rules only if absent.
+
+OUTPUTS (written to --out_dir)
+------------------------------
+  nmd_scored_candidates.tsv   every candidate with NMD class, ensemble
+                              confidence (0-3), Lindeboom rule hit and tier
+  nmd_hla_breakdown.tsv       NMD class counts per HLA allele
+                              (only written when at least one candidate has HLA)
+  report_nmd.html             self-contained per-sample HTML report
+                              (tiers, IC50, NMD breakdown and confidence plots)
+
+USAGE
+-----
   python nmd_scoring.py --pvacseq_tsv <path> --vep_vcf <path> --out_dir <path>
   python nmd_scoring.py --pvacseq_tsv <path> --out_dir <path>  # rule-based only
 """
@@ -243,6 +265,13 @@ def score_candidates(pvacseq_df: pd.DataFrame, vep_variants: dict) -> pd.DataFra
 
 def hla_allele_breakdown(scored_df: pd.DataFrame) -> pd.DataFrame:
     """Summarise Tier 1 and Tier 2 candidates by HLA allele."""
+    # level-3 reproducibility fix: 0-candidate samples (empty pVACseq
+    # filtered.tsv) produce a column-less empty scored_df, so accessing
+    # ['priority_tier'] raised KeyError and crashed Stage 3 (regression vs the
+    # May-2026 backup, which scored these 7 samples as empty per_sample dirs).
+    # Guard the empty/missing-column case up front — restores prior behavior.
+    if scored_df.empty or 'priority_tier' not in scored_df.columns:
+        return pd.DataFrame()
     t12 = scored_df[scored_df['priority_tier'].isin(['TIER1','TIER2'])]
     if t12.empty:
         return pd.DataFrame()
@@ -547,17 +576,27 @@ Missense variants (NOT_APPLICABLE) are not subject to NMD but remain immunogenic
 # ═════════════════════════════════════════════════════════════════════════════
 
 def main():
-    parser = argparse.ArgumentParser(description="GBM Stage 7 — NMD Sensitivity Scoring")
-    parser.add_argument('--pvacseq_tsv', required=True)
+    parser = argparse.ArgumentParser(
+        description=(
+            "GBM Pipeline Stage 3 — per-sample NMD sensitivity scoring. "
+            "Reads pVACseq neoantigen candidates (--pvacseq_tsv) and, optionally, "
+            "a VEP-annotated VCF (--vep_vcf) for the NMD plugin field, then writes "
+            "nmd_scored_candidates.tsv, nmd_hla_breakdown.tsv and report_nmd.html "
+            "to --out_dir. With no --vep_vcf, scoring uses Lindeboom rules only."
+        )
+    )
+    parser.add_argument('--pvacseq_tsv', required=True,
+                        help='pVACseq candidates TSV for one sample (required).')
     parser.add_argument('--vep_vcf', default=None,
                         help='VEP-annotated VCF (gzipped). Optional — rule-based only if absent.')
-    parser.add_argument('--out_dir', default='./nmd_output')
+    parser.add_argument('--out_dir', default='./nmd_output',
+                        help='Output directory for the per-sample NMD report.')
     args = parser.parse_args()
 
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    print(f"\n{'='*60}\n  GBM Pipeline - Stage 7: NMD Sensitivity Scoring\n{'='*60}\n")
+    print(f"\n{'='*60}\n  GBM Pipeline - Stage 3: NMD Sensitivity Scoring\n{'='*60}\n")
     print(f"[INFO] Loading pVACseq results: {args.pvacseq_tsv}")
     pvacseq_df = pd.read_csv(args.pvacseq_tsv, sep='\t')
     print(f"[INFO] {len(pvacseq_df)} candidates loaded")
@@ -573,6 +612,20 @@ def main():
     scored_df = score_candidates(pvacseq_df, vep_variants)
     scored_df.to_csv(out_dir / "nmd_scored_candidates.tsv", sep='\t', index=False)
     print(f"[TABLE] Saved {out_dir}/nmd_scored_candidates.tsv")
+
+    # level-3 reproducibility fix: 0-candidate samples (empty pVACseq
+    # filtered.tsv) yield a column-less scored_df. The HLA breakdown, the
+    # summary counts below, and generate_report all assume columns like
+    # 'nmd_consensus'/'priority_tier' exist and crash with KeyError (regression
+    # vs the May-2026 backup). The backup emitted ONLY an empty
+    # nmd_scored_candidates.tsv for such samples (7 of 56: 5_T,5_M,6_T,17_T,
+    # 18_T,36_T,52_M) — reproduce that exactly by returning early here.
+    if scored_df.empty:
+        print("[INFO] 0 scored candidates — empty sample; wrote "
+              "nmd_scored_candidates.tsv only (matches baseline behavior).")
+        print(f"\n{'='*60}\n  Stage 7 complete (empty sample). "
+              f"Output: {out_dir.resolve()}\n{'='*60}\n")
+        return
 
     hla_bd = hla_allele_breakdown(scored_df)
     if not hla_bd.empty:

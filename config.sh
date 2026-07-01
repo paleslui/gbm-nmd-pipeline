@@ -68,6 +68,14 @@ TMP=$BASE/tmp
 # pVACseq algorithms (Class I only — Class II requires separate HLA typing)
 PVACSEQ_ALGORITHMS="MHCflurry MHCnuggetsI NetMHC NetMHCpan NetMHCpanEL PickPocket SMM SMMPMBEC"
 
+# TMB normalisation: total callable region in megabases.
+# Default 30 Mb assumes standard whole-exome capture.
+# Replace with exact value when capture-kit BED is available:
+#   bedtools genomecov -bg -i target.bed | awk '{s += $3-$2} END {print s/1e6}'
+# Exported so the Stage 1 Python child (gbm_analysis.py via slurm_python.sh)
+# can read it from the environment (os.environ["TMB_DENOMINATOR_MB"]).
+export TMB_DENOMINATOR_MB=30
+
 
 export NXF_HOME=$BASE/.nextflow
 

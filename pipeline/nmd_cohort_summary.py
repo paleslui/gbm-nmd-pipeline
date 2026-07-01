@@ -11,22 +11,39 @@ Missense, inframe and stop_gained variants are summarized at the top
 
 Outputs (in --out_dir):
   cohort_candidates.tsv     all candidates, all variant types
+                            (now also: binder_class, clonality columns)
   cohort_summary.tsv        cohort-level counts (variant landscape + FS NMD)
   cohort_paired.tsv         per-patient T (primary) vs M (recurrent), FS only
   cohort_tier1.tsv          TIER1 high-priority candidates only
-  cohort_report.html        single HTML report (mirrors per-sample style;
-                            adds T-vs-M paired plot, top recurrent genes,
-                            and an interactive per-sample drill-down widget)
+  cohort_landscape.tsv      variant-type landscape
+
+  per_sample_nmd_summary.tsv             Module 3: variant-level NMD aggregation
+  per_sample_neoepitope_summary.tsv      Module 4: binder/clonality burden
+  per_sample_neoepitope_nmd_summary.tsv  Module 5: neoepitopes split by NMD class
+  paired_stats_stage3.tsv                Wilcoxon + BH-FDR for Modules 3/4/5
+  m3_*.png m4_*.png m5_*.png             12 module plots (300 dpi)
+  cohort_report.html        single HTML report (intro + cohort overview +
+                            landscape + Modules 3/4/5 + per-pair overlap widget +
+                            per-patient drill-down widget + genes/HLA/tiers)
+
+Optional Stage 1 join inputs:
+  --stage1_summary <sample_mutation_summary.tsv>  for truncating_total / TMB
+  --paired_overlap <paired_variant_overlap.tsv>   for the overlap widget
+  Both degrade gracefully (NaN-filled / skipped) when absent.
 
 Usage:
-  python nmd_cohort_summary.py --input_dir <per_sample_dir> --out_dir <cohort_dir>
+  python nmd_cohort_summary.py --input_dir <per_sample_dir> --out_dir <cohort_dir> \\
+      [--stage1_summary <tsv>] [--paired_overlap <tsv>]
 """
-import argparse, json, re, sys
+import argparse, base64, io, json, re, sys
 from pathlib import Path
+from typing import Dict, List, Optional, Tuple
 
+import numpy as np
 import pandas as pd
 import matplotlib; matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+from scipy.stats import spearmanr, wilcoxon
 
 # Reuse plotting + style from per-sample scorer for consistent look
 sys.path.insert(0, str(Path(__file__).parent))
@@ -267,6 +284,585 @@ def plot_top_genes(fs_cohort: pd.DataFrame, n: int = 20) -> str:
     ax.spines[["top","right"]].set_visible(False)
     fig.tight_layout()
     return _b64fig(fig)
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# MAX MODULES 3/4/5 — variant-level NMD, neoepitope burden, neoepitopes-by-NMD
+# ═════════════════════════════════════════════════════════════════════════════
+
+# Variant identity = (chrom, pos, ref, alt, sample). NMD is a transcript-level
+# property, so all peptides of one variant share a consensus; worst-case folding
+# (SENSITIVE > INSENSITIVE > UNCERTAIN > UNKNOWN) is defensive.
+_NMD_PRIORITY = ["SENSITIVE", "INSENSITIVE", "UNCERTAIN", "UNKNOWN"]
+_NMD_RANK = {c: i for i, c in enumerate(_NMD_PRIORITY)}
+
+
+def _variant_keys(df: pd.DataFrame) -> pd.Series:
+    """Build a per-row variant identity key 'chrom:pos:ref>alt@sample'."""
+    return (df["Chromosome"].astype(str) + ":" + df["Start"].astype(str) + ":"
+            + df["Reference"].astype(str) + ">" + df["Variant"].astype(str)
+            + "@" + df["sample"].astype(str))
+
+
+def augment_candidates(cohort: pd.DataFrame) -> pd.DataFrame:
+    """Append binder_class and clonality columns to the candidate table.
+
+    Inputs:  cohort candidate DataFrame (must have 'Best MT IC50 Score',
+             'Tumor DNA VAF').
+    Output:  same DataFrame with two appended columns:
+             binder_class — Strong (IC50<50 nM) / Weak (50–500) / Non-binder
+                            (≥500 or null);
+             clonality    — Clonal (VAF≥0.30) / Subclonal (<0.30) / Unknown (null).
+    Side effects: mutates and returns ``cohort``.
+    """
+    if cohort.empty:
+        cohort["binder_class"] = pd.Series(dtype=str)
+        cohort["clonality"] = pd.Series(dtype=str)
+        return cohort
+    ic50 = pd.to_numeric(cohort["Best MT IC50 Score"], errors="coerce")
+    vaf = pd.to_numeric(cohort["Tumor DNA VAF"], errors="coerce")
+
+    def _binder(x: float) -> str:
+        if pd.isna(x):
+            return "Non-binder"
+        if x < 50:
+            return "Strong"
+        if x < 500:
+            return "Weak"
+        return "Non-binder"
+
+    def _clon(x: float) -> str:
+        if pd.isna(x):
+            return "Unknown"
+        return "Clonal" if x >= 0.30 else "Subclonal"
+
+    cohort["binder_class"] = ic50.map(_binder)
+    cohort["clonality"] = vaf.map(_clon)
+    return cohort
+
+
+def variant_nmd_table(cohort: pd.DataFrame) -> pd.DataFrame:
+    """Collapse the candidate table to one row per variant with worst-case NMD.
+
+    Input:   cohort candidate DataFrame.
+    Output:  DataFrame with columns vkey, sample, patient, timepoint,
+             Variant Type, nmd (worst-case consensus across the variant's
+             peptides). One row per unique (chrom,pos,ref,alt,sample).
+    """
+    if cohort.empty:
+        return pd.DataFrame(columns=["vkey", "sample", "patient", "timepoint",
+                                     "Variant Type", "nmd"])
+    df = cohort[["sample", "patient", "timepoint", "Variant Type",
+                 "nmd_consensus"]].copy()
+    df["vkey"] = _variant_keys(cohort)
+    df["nmd"] = df["nmd_consensus"].where(
+        df["nmd_consensus"].isin(_NMD_PRIORITY), "UNKNOWN")
+    df["_rank"] = df["nmd"].map(_NMD_RANK)
+    # worst-case = highest priority = smallest rank
+    df = df.sort_values("_rank").groupby("vkey", as_index=False).first()
+    return df[["vkey", "sample", "patient", "timepoint", "Variant Type", "nmd"]]
+
+
+def _sample_meta(cohort: pd.DataFrame) -> pd.DataFrame:
+    """Unique (sample, patient, timepoint) rows, ordered patient↑ then T,M."""
+    meta = cohort[["sample", "patient", "timepoint"]].drop_duplicates()
+    meta = meta.sort_values(
+        ["patient", "timepoint"],
+        key=lambda s: s.map(int) if s.name == "patient"
+        else s.map({"primary": 0, "recurrent": 1})).reset_index(drop=True)
+    return meta
+
+
+def module3_nmd_summary(cohort: pd.DataFrame, variant_tbl: pd.DataFrame,
+                        stage1: Optional[pd.DataFrame]) -> pd.DataFrame:
+    """Module 3 — per-sample variant-level NMD aggregation (FS / truncating).
+
+    Inputs:  cohort table, the per-variant NMD table, and the optional Stage 1
+             sample_mutation_summary (joined on 'sample' for truncating_total).
+    Output:  one row per sample (all samples with ≥1 candidate) with columns
+             sample, patient, timepoint, truncating_total_from_stage1,
+             truncating_in_pvacseq, nmd_sensitive, nmd_insensitive,
+             nmd_uncertain, nmd_unknown, nmd_fraction. Category counts are over
+             unique FS variants; nmd_fraction = sensitive/(sensitive+insensitive),
+             NaN if that denominator is zero.
+    """
+    meta = _sample_meta(cohort)
+    fs = variant_tbl[variant_tbl["Variant Type"] == "FS"]
+    s1 = (stage1.set_index("sample")["truncating_total"].to_dict()
+          if stage1 is not None and "truncating_total" in stage1.columns else {})
+
+    rows: List[Dict[str, object]] = []
+    for _, m in meta.iterrows():
+        sub = fs[fs["sample"] == m["sample"]]
+        sens = int((sub["nmd"] == "SENSITIVE").sum())
+        insens = int((sub["nmd"] == "INSENSITIVE").sum())
+        unc = int((sub["nmd"] == "UNCERTAIN").sum())
+        unk = int((sub["nmd"] == "UNKNOWN").sum())
+        denom = sens + insens
+        rows.append({
+            "sample": m["sample"], "patient": m["patient"],
+            "timepoint": m["timepoint"],
+            "truncating_total_from_stage1": float(s1.get(m["sample"], np.nan)),
+            "truncating_in_pvacseq": len(sub),
+            "nmd_sensitive": sens, "nmd_insensitive": insens,
+            "nmd_uncertain": unc, "nmd_unknown": unk,
+            "nmd_fraction": round(sens / denom, 4) if denom else np.nan,
+        })
+    return pd.DataFrame(rows)
+
+
+def module4_neoepitope_summary(cohort: pd.DataFrame) -> pd.DataFrame:
+    """Module 4 — per-sample neoepitope (binder) burden and clonality.
+
+    Input:   cohort table augmented with binder_class / clonality.
+    Output:  one row per sample with columns sample, patient, timepoint,
+             total_peptides, strong_binders, weak_binders, non_binders,
+             clonal_binders, subclonal_binders, fraction_clonal. Counts are over
+             all peptide rows; clonal/subclonal counts exclude Non-binders;
+             fraction_clonal = clonal/(clonal+subclonal), NaN if denominator zero.
+    """
+    meta = _sample_meta(cohort)
+    rows: List[Dict[str, object]] = []
+    for _, m in meta.iterrows():
+        sub = cohort[cohort["sample"] == m["sample"]]
+        binders = sub[sub["binder_class"] != "Non-binder"]
+        clonal = int((binders["clonality"] == "Clonal").sum())
+        subclonal = int((binders["clonality"] == "Subclonal").sum())
+        denom = clonal + subclonal
+        rows.append({
+            "sample": m["sample"], "patient": m["patient"],
+            "timepoint": m["timepoint"],
+            "total_peptides": int(len(sub)),
+            "strong_binders": int((sub["binder_class"] == "Strong").sum()),
+            "weak_binders": int((sub["binder_class"] == "Weak").sum()),
+            "non_binders": int((sub["binder_class"] == "Non-binder").sum()),
+            "clonal_binders": clonal, "subclonal_binders": subclonal,
+            "fraction_clonal": round(clonal / denom, 4) if denom else np.nan,
+        })
+    return pd.DataFrame(rows)
+
+
+def module5_neoepitope_nmd_summary(cohort: pd.DataFrame,
+                                   variant_tbl: pd.DataFrame) -> pd.DataFrame:
+    """Module 5 — per-sample neoepitopes split by their variant's NMD class.
+
+    Inputs:  cohort table (augmented), and the per-variant NMD table (Module B)
+             used to look up each neoepitope's variant-level NMD consensus.
+    Output:  one row per sample with columns sample, patient, timepoint,
+             total_neoepitopes_strong, nmd_sensitive_neo_strong,
+             nmd_escape_neo_strong, total_neoepitopes_all, nmd_sensitive_neo_all,
+             nmd_escape_neo_all, fraction_escape_strong, fraction_escape_all.
+             A neoepitope is any peptide with binder_class != Non-binder; '_strong'
+             restricts to Strong binders. fraction_escape =
+             escape/(escape+sensitive); UNCERTAIN/UNKNOWN variants are excluded
+             from both terms; NaN if the denominator is zero.
+    """
+    meta = _sample_meta(cohort)
+    nmd_map = dict(zip(variant_tbl["vkey"], variant_tbl["nmd"]))
+    df = cohort.copy()
+    df["vkey"] = _variant_keys(df)
+    df["vcons"] = df["vkey"].map(nmd_map)
+    neo = df[df["binder_class"] != "Non-binder"]
+
+    rows: List[Dict[str, object]] = []
+    for _, m in meta.iterrows():
+        sub = neo[neo["sample"] == m["sample"]]
+        strong = sub[sub["binder_class"] == "Strong"]
+        s_sens = int((strong["vcons"] == "SENSITIVE").sum())
+        s_esc = int((strong["vcons"] == "INSENSITIVE").sum())
+        a_sens = int((sub["vcons"] == "SENSITIVE").sum())
+        a_esc = int((sub["vcons"] == "INSENSITIVE").sum())
+        s_denom, a_denom = s_sens + s_esc, a_sens + a_esc
+        rows.append({
+            "sample": m["sample"], "patient": m["patient"],
+            "timepoint": m["timepoint"],
+            "total_neoepitopes_strong": int(len(strong)),
+            "nmd_sensitive_neo_strong": s_sens,
+            "nmd_escape_neo_strong": s_esc,
+            "total_neoepitopes_all": int(len(sub)),
+            "nmd_sensitive_neo_all": a_sens,
+            "nmd_escape_neo_all": a_esc,
+            "fraction_escape_strong": round(s_esc / s_denom, 4) if s_denom else np.nan,
+            "fraction_escape_all": round(a_esc / a_denom, 4) if a_denom else np.nan,
+        })
+    return pd.DataFrame(rows)
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# PAIRED STATISTICS (Stage 3 — Wilcoxon signed-rank + BH-FDR)
+# ═════════════════════════════════════════════════════════════════════════════
+
+# (module, metric) pairs tested in paired_stats_stage3.tsv.
+_STAGE3_PAIRED_SPEC: List[Tuple[str, str]] = [
+    ("3", "nmd_fraction"), ("3", "nmd_sensitive"), ("3", "nmd_insensitive"),
+    ("4", "total_peptides"), ("4", "strong_binders"),
+    ("4", "clonal_binders"), ("4", "fraction_clonal"),
+    ("5", "fraction_escape_strong"), ("5", "fraction_escape_all"),
+    ("5", "nmd_sensitive_neo_strong"), ("5", "nmd_escape_neo_strong"),
+]
+
+
+def _bh_adjust(pvals: np.ndarray) -> np.ndarray:
+    """Benjamini-Hochberg FDR; NaN p-values are excluded and stay NaN."""
+    out = np.full(pvals.shape, np.nan)
+    mask = ~np.isnan(pvals)
+    p = pvals[mask]
+    n = p.size
+    if n == 0:
+        return out
+    order = np.argsort(p)
+    ranked = p[order] * n / np.arange(1, n + 1)
+    ranked = np.minimum.accumulate(ranked[::-1])[::-1]
+    adj = np.empty(n)
+    adj[order] = np.clip(ranked, 0, 1)
+    out[mask] = adj
+    return out
+
+
+def compute_paired_stats_stage3(wide: pd.DataFrame) -> pd.DataFrame:
+    """Paired Wilcoxon tests for the Module 3/4/5 metrics with BH-FDR.
+
+    Input:   ``wide`` per-sample frame (sample, patient, timepoint + all module
+             metric columns).
+    Output:  DataFrame with columns module, metric, n_pairs, median_primary,
+             median_recurrent, median_delta, mean_delta, wilcoxon_stat, p_value,
+             p_value_adj_bh, note. Pairs require both timepoints present for a
+             patient; pairs with a NaN metric value are dropped (n_pairs reflects
+             usable pairs). BH-FDR is applied across all rows of this table.
+    """
+    prim = wide[wide.timepoint == "primary"].set_index("patient")
+    recu = wide[wide.timepoint == "recurrent"].set_index("patient")
+    paired = sorted(set(prim.index) & set(recu.index), key=int)
+
+    rows: List[Dict[str, object]] = []
+    for module, metric in _STAGE3_PAIRED_SPEC:
+        if metric not in wide.columns:
+            rows.append({"module": module, "metric": metric, "n_pairs": 0,
+                         "median_primary": np.nan, "median_recurrent": np.nan,
+                         "median_delta": np.nan, "mean_delta": np.nan,
+                         "wilcoxon_stat": np.nan, "p_value": np.nan,
+                         "p_value_adj_bh": np.nan, "note": "metric absent"})
+            continue
+        p = prim.loc[paired, metric].astype(float).to_numpy()
+        r = recu.loc[paired, metric].astype(float).to_numpy()
+        mask = ~(np.isnan(p) | np.isnan(r))
+        pv, rv = p[mask], r[mask]
+        delta = rv - pv
+        n = len(delta)
+        dropped = int(len(paired) - n)
+
+        stat = p_value = np.nan
+        note = f"{dropped} pair(s) dropped (undefined metric)" if dropped else ""
+        if n < 6:
+            note = (note + "; " if note else "") + "fewer than 6 pairs"
+        elif np.allclose(delta, delta[0]):
+            note = (note + "; " if note else "") + "zero variance in deltas"
+        else:
+            try:
+                res = wilcoxon(rv, pv)
+                stat, p_value = float(res.statistic), float(res.pvalue)
+            except ValueError as exc:
+                note = (note + "; " if note else "") + f"wilcoxon undefined ({exc})"
+
+        rows.append({
+            "module": module, "metric": metric, "n_pairs": n,
+            "median_primary": round(float(np.median(pv)), 4) if n else np.nan,
+            "median_recurrent": round(float(np.median(rv)), 4) if n else np.nan,
+            "median_delta": round(float(np.median(delta)), 4) if n else np.nan,
+            "mean_delta": round(float(np.mean(delta)), 4) if n else np.nan,
+            "wilcoxon_stat": stat, "p_value": p_value,
+            "p_value_adj_bh": np.nan, "note": note,
+        })
+    stats = pd.DataFrame(rows)
+    stats["p_value_adj_bh"] = _bh_adjust(stats["p_value"].to_numpy(dtype=float))
+    return stats
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# MODULE PLOTS (saved as 300 dpi PNGs to out_dir; also embedded in the report)
+# ═════════════════════════════════════════════════════════════════════════════
+
+# Palette shared with Stage 1.
+COL_SENS = "#D85A30"   # NMD-sensitive
+COL_ESC = "#378ADD"    # NMD-escape (insensitive)
+COL_CLONAL = "#377AB8"
+COL_SUBCLONAL = "#D85A30"
+
+
+def _save_b64(fig: plt.Figure, out_dir: Path, name: str) -> str:
+    """Save ``fig`` at 300 dpi to out_dir/name and return a base64 data URI."""
+    path = out_dir / name
+    fig.tight_layout()
+    fig.savefig(path, dpi=300)
+    plt.close(fig)
+    return "data:image/png;base64," + base64.b64encode(path.read_bytes()).decode()
+
+
+def _paired_arrays(wide: pd.DataFrame, metric: str
+                   ) -> Tuple[List[str], List[float], List[float]]:
+    """Return (paired_patients, primary_values, recurrent_values) for ``metric``."""
+    prim = wide[wide.timepoint == "primary"].set_index("patient")[metric]
+    recu = wide[wide.timepoint == "recurrent"].set_index("patient")[metric]
+    patients = sorted(set(prim.index) & set(recu.index), key=int)
+    return (patients, [float(prim[p]) for p in patients],
+            [float(recu[p]) for p in patients])
+
+
+def _p_annotation(stats: pd.DataFrame, metric: str) -> str:
+    """Format 'p = … (Δ̃ = …)' annotation for ``metric`` from the stats table."""
+    row = stats[stats.metric == metric]
+    if row.empty:
+        return ""
+    r = row.iloc[0]
+    parts = []
+    if pd.notna(r["p_value"]):
+        p = float(r["p_value"])
+        parts.append(f"p = {p:.1e}" if p < 1e-3 else f"p = {p:.3f}")
+    else:
+        parts.append("p = n/a")
+    if pd.notna(r["median_delta"]):
+        parts.append(f"median Δ = {float(r['median_delta']):.3g}")
+    return "\n".join(parts)
+
+
+def _connected_dots(ax: plt.Axes, prim: List[float], recu: List[float],
+                    ylabel: str, title: str) -> None:
+    """Draw a primary→recurrent connected dot plot onto ``ax``."""
+    for yp, yr in zip(prim, recu):
+        ax.plot([0, 1], [yp, yr], color="#cccccc", lw=0.9, zorder=1)
+    ax.scatter([0] * len(prim), prim, color=COL_T, s=42, zorder=3)
+    ax.scatter([1] * len(recu), recu, color=COL_M, s=42, zorder=3)
+    ax.set_xticks([0, 1])
+    ax.set_xticklabels(["Primary", "Recurrent"])
+    ax.set_xlim(-0.4, 1.4)
+    ax.set_ylabel(ylabel)
+    ax.set_title(title, fontsize=12)
+    ax.spines[["top", "right"]].set_visible(False)
+
+
+def plot_paired_metric(wide: pd.DataFrame, stats: pd.DataFrame, metric: str,
+                       ylabel: str, title: str, out_dir: Path, name: str,
+                       annotate: bool = True) -> str:
+    """Connected dot plot for one paired metric (optionally p-value annotated)."""
+    patients, prim, recu = _paired_arrays(wide, metric)
+    fig, ax = plt.subplots(figsize=(6, 7))
+    _connected_dots(ax, prim, recu, ylabel, title)
+    if annotate:
+        ann = _p_annotation(stats, metric)
+        if ann:
+            ax.text(0.97, 0.97, ann, transform=ax.transAxes, ha="right", va="top",
+                    fontsize=11, bbox=dict(boxstyle="round", fc="white", ec="#cccccc"))
+    return _save_b64(fig, out_dir, name)
+
+
+def plot_waterfall(wide: pd.DataFrame, metric: str, ylabel: str, title: str,
+                   out_dir: Path, name: str) -> str:
+    """Waterfall of (recurrent − primary) per patient, sorted by delta."""
+    patients, prim, recu = _paired_arrays(wide, metric)
+    deltas = sorted([(p, r - t) for p, t, r in zip(patients, prim, recu)],
+                    key=lambda x: x[1])
+    labels = [d[0] for d in deltas]
+    values = [d[1] for d in deltas]
+    colors = [COL_SENS if v > 0 else COL_ESC for v in values]
+    fig, ax = plt.subplots(figsize=(13, 5))
+    ax.bar(range(len(values)), values, color=colors, width=0.7)
+    ax.axhline(0, color="#333333", lw=0.8)
+    ax.set_xticks(range(len(labels)))
+    ax.set_xticklabels(labels, rotation=90, fontsize=8)
+    ax.set_xlabel("Patient (sorted by Δ)")
+    ax.set_ylabel(ylabel)
+    ax.set_title(title, fontsize=12)
+    ax.spines[["top", "right"]].set_visible(False)
+    return _save_b64(fig, out_dir, name)
+
+
+def plot_stacked_two(wide: pd.DataFrame, lower: str, upper: str,
+                     lower_label: str, upper_label: str, lower_color: str,
+                     upper_color: str, ylabel: str, title: str,
+                     out_dir: Path, name: str) -> str:
+    """Two-category stacked bar per sample (samples ordered patient↑, T before M)."""
+    df = wide.sort_values(
+        ["patient", "timepoint"],
+        key=lambda s: s.map(int) if s.name == "patient"
+        else s.map({"primary": 0, "recurrent": 1}))
+    x = range(len(df))
+    lo = df[lower].fillna(0).to_numpy()
+    up = df[upper].fillna(0).to_numpy()
+    fig, ax = plt.subplots(figsize=(16, 6))
+    ax.bar(x, lo, color=lower_color, label=lower_label)
+    ax.bar(x, up, bottom=lo, color=upper_color, label=upper_label)
+    ax.set_xticks(list(x))
+    ax.set_xticklabels(df["sample"], rotation=90, fontsize=8)
+    ax.set_ylabel(ylabel)
+    ax.set_title(title, fontsize=12)
+    ax.legend()
+    ax.spines[["top", "right"]].set_visible(False)
+    return _save_b64(fig, out_dir, name)
+
+
+def plot_scatter(wide: pd.DataFrame, xcol: str, ycol: str, xlabel: str,
+                 ylabel: str, title: str, out_dir: Path, name: str,
+                 logx: bool = False, spearman: bool = True) -> str:
+    """Scatter of ycol vs xcol coloured by timepoint, optional Spearman ρ."""
+    fig, ax = plt.subplots(figsize=(8, 6))
+    for tp, color in (("primary", COL_T), ("recurrent", COL_M)):
+        sub = wide[wide.timepoint == tp]
+        ax.scatter(sub[xcol], sub[ycol], color=color, s=42, alpha=0.8,
+                   label=tp.capitalize())
+    if spearman:
+        x = pd.to_numeric(wide[xcol], errors="coerce").to_numpy()
+        y = pd.to_numeric(wide[ycol], errors="coerce").to_numpy()
+        ok = ~(np.isnan(x) | np.isnan(y))
+        if logx:
+            ok &= x > 0
+        if ok.sum() > 2:
+            rho, p = spearmanr(x[ok], y[ok])
+            ann = (f"Spearman ρ = {rho:.2f}\n"
+                   + (f"p = {p:.1e}" if p < 1e-3 else f"p = {p:.3f}"))
+            ax.text(0.97, 0.97, ann, transform=ax.transAxes, ha="right", va="top",
+                    fontsize=11, bbox=dict(boxstyle="round", fc="white", ec="#cccccc"))
+    if logx:
+        ax.set_xscale("log")
+    ax.set_xlabel(xlabel)
+    ax.set_ylabel(ylabel)
+    ax.set_title(title, fontsize=12)
+    ax.legend()
+    ax.spines[["top", "right"]].set_visible(False)
+    return _save_b64(fig, out_dir, name)
+
+
+def plot_paired_two_panel(wide: pd.DataFrame, m1: str, m2: str, lab1: str,
+                          lab2: str, title: str, out_dir: Path, name: str) -> str:
+    """Two connected dot plots side by side (e.g. total vs strong binders)."""
+    fig, axes = plt.subplots(1, 2, figsize=(11, 6.5))
+    for ax, metric, lab in ((axes[0], m1, lab1), (axes[1], m2, lab2)):
+        _, prim, recu = _paired_arrays(wide, metric)
+        _connected_dots(ax, prim, recu, lab, lab)
+    fig.suptitle(title, fontsize=13)
+    return _save_b64(fig, out_dir, name)
+
+
+def make_module_plots(wide: pd.DataFrame, stats: pd.DataFrame, out_dir: Path,
+                      have_stage1: bool) -> Dict[str, str]:
+    """Generate the 12 Module 3/4/5 plots; return {key: base64 data URI}.
+
+    The m4 TMB-vs-neoepitope scatter is skipped (empty URI) when Stage 1 data
+    (tmb_per_mb) is unavailable.
+    """
+    print("[STEP] Generating Module 3/4/5 plots ...")
+    b: Dict[str, str] = {}
+
+    # Module 3
+    b["m3_paired"] = plot_paired_metric(
+        wide, stats, "nmd_fraction", "NMD fraction",
+        "M3 — Paired NMD-sensitive fraction (FS)", out_dir,
+        "m3_paired_nmd_fraction.png")
+    b["m3_delta"] = plot_waterfall(
+        wide, "nmd_fraction", "Δ NMD fraction (recurrent − primary)",
+        "M3 — Change in NMD-sensitive fraction", out_dir,
+        "m3_delta_nmd_fraction.png")
+    b["m3_stacked"] = plot_stacked_two(
+        wide, "nmd_sensitive", "nmd_insensitive", "NMD-sensitive",
+        "NMD-escape (insensitive)", COL_SENS, COL_ESC, "FS variant count",
+        "M3 — NMD-sensitive vs escape per sample", out_dir,
+        "m3_stacked_sensitive_escape.png")
+    b["m3_scatter"] = plot_scatter(
+        wide, "truncating_in_pvacseq", "nmd_sensitive",
+        "Truncating variants in pVACseq", "NMD-sensitive variants",
+        "M3 — Truncating burden vs NMD-sensitive count", out_dir,
+        "m3_scatter_trunc_vs_nmdsens.png")
+
+    # Module 4
+    b["m4_paired"] = plot_paired_two_panel(
+        wide, "total_peptides", "strong_binders", "Total binders",
+        "Strong binders", "M4 — Paired neoepitope burden", out_dir,
+        "m4_paired_neoepitope_burden.png")
+    b["m4_stacked"] = plot_stacked_two(
+        wide, "clonal_binders", "subclonal_binders", "Clonal binders",
+        "Subclonal binders", COL_CLONAL, COL_SUBCLONAL, "Binder count",
+        "M4 — Binder clonality per sample", out_dir, "m4_stacked_clonality.png")
+    if have_stage1 and "tmb_per_mb" in wide.columns:
+        b["m4_scatter"] = plot_scatter(
+            wide, "tmb_per_mb", "strong_binders", "TMB per Mb (log scale)",
+            "Strong binders", "M4 — TMB vs strong-binder burden", out_dir,
+            "m4_scatter_tmb_vs_neo.png", logx=True)
+    else:
+        print("  [WARN] Stage 1 TMB unavailable — skipping m4_scatter_tmb_vs_neo.png")
+        b["m4_scatter"] = ""
+    b["m4_delta"] = plot_waterfall(
+        wide, "strong_binders", "Δ strong binders (recurrent − primary)",
+        "M4 — Change in strong-binder burden", out_dir,
+        "m4_delta_neoepitopes.png")
+
+    # Module 5
+    b["m5_paired"] = plot_paired_metric(
+        wide, stats, "fraction_escape_strong", "Fraction NMD-escape (strong)",
+        "M5 — Paired NMD-escape fraction (strong binders)", out_dir,
+        "m5_paired_fraction_escape.png")
+    b["m5_stacked"] = plot_stacked_two(
+        wide, "nmd_sensitive_neo_strong", "nmd_escape_neo_strong",
+        "NMD-sensitive neo", "NMD-escape neo", COL_SENS, COL_ESC,
+        "Strong neoepitope count",
+        "M5 — Sensitive vs escape neoepitopes per sample (strong)", out_dir,
+        "m5_stacked_sensitive_escape_neo.png")
+    b["m5_delta"] = plot_waterfall(
+        wide, "fraction_escape_strong",
+        "Δ NMD-escape fraction (recurrent − primary)",
+        "M5 — Change in NMD-escape fraction (strong)", out_dir,
+        "m5_delta_fraction_escape.png")
+    b["m5_paired_count"] = plot_paired_metric(
+        wide, stats, "nmd_sensitive_neo_strong", "NMD-sensitive neoepitopes",
+        "M5 — Paired NMD-sensitive neoepitope count (strong)", out_dir,
+        "m5_paired_nmd_sensitive_neo.png")
+    return b
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# PER-PAIR VARIANT OVERLAP WIDGET DATA
+# ═════════════════════════════════════════════════════════════════════════════
+
+def build_overlap_data(overlap_df: Optional[pd.DataFrame],
+                       variant_tbl: pd.DataFrame,
+                       stage1: Optional[pd.DataFrame]) -> Dict[str, dict]:
+    """Build the per-pair overlap widget JSON from Stage 1's overlap table.
+
+    Inputs:  ``overlap_df`` Stage 1 paired_variant_overlap.tsv (or None); the
+             per-variant NMD table; and the optional Stage 1 summary. Patients
+             are kept only if both timepoints carry ≥1 truncating variant. The
+             truncating set is taken from Stage 1's truncating_total (whole-exome
+             FS+SG+splice+start_lost) when available, else falls back to FS
+             variants that reached pVACseq.
+    Output:  {patient: {t_total, m_total, shared, t_private, m_private,
+             shared_pct_of_t, shared_pct_of_m}}. Empty dict if overlap data is
+             unavailable.
+    """
+    if overlap_df is None or overlap_df.empty:
+        return {}
+    if stage1 is not None and "truncating_total" in stage1.columns:
+        s = stage1.copy()
+        s["patient"] = s["sample"].astype(str).str.split("_").str[0]
+        s["tp"] = s["sample"].astype(str).str.split("_").str[1]
+        trunc = pd.to_numeric(s["truncating_total"], errors="coerce").fillna(0)
+        has_t = set(s[(s.tp == "T") & (trunc > 0)]["patient"])
+        has_m = set(s[(s.tp == "M") & (trunc > 0)]["patient"])
+    else:
+        fs = variant_tbl[variant_tbl["Variant Type"] == "FS"]
+        has_t = set(fs[fs.timepoint == "primary"]["patient"].astype(str))
+        has_m = set(fs[fs.timepoint == "recurrent"]["patient"].astype(str))
+    qualifying = has_t & has_m
+    out: Dict[str, dict] = {}
+    for _, r in overlap_df.iterrows():
+        pid = str(int(r["patient"])) if not isinstance(r["patient"], str) else str(r["patient"])
+        if qualifying and pid not in qualifying:
+            continue
+        out[pid] = {
+            "t_total": int(r["t_total"]), "m_total": int(r["m_total"]),
+            "shared": int(r["shared"]), "t_private": int(r["t_private"]),
+            "m_private": int(r["m_private"]),
+            "shared_pct_of_t": float(r["shared_pct_of_t"]),
+            "shared_pct_of_m": float(r["shared_pct_of_m"]),
+        }
+    return out
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -725,9 +1321,133 @@ function renderPatient(pid) {
 """
 
 
+OVERLAP_WIDGET_HTML = """
+<h2>Per-pair variant overlap (interactive)</h2>
+<p class="sub">
+  Select a patient to compare their primary (T) and recurrent (M) PASS variant
+  sets (Stage 1 <code>paired_variant_overlap.tsv</code>). Only patients with at
+  least one truncating (frameshift) variant in <em>both</em> timepoints are shown.
+</p>
+<div class="widget">
+  <div style="display:flex;gap:14px;align-items:center;margin-bottom:14px;">
+    <label for="overlap-select"><strong>Patient:</strong></label>
+    <select id="overlap-select" style="min-width:200px;"></select>
+  </div>
+  <div style="display:flex;gap:28px;flex-wrap:wrap;align-items:center;">
+    <div id="overlap-venn"></div>
+    <div id="overlap-box" class="meta" style="font-size:13px;"></div>
+  </div>
+</div>
+<script>
+const OVERLAP_DATA = __OVERLAP_DATA__;
+const OVERLAP_KEYS = Object.keys(OVERLAP_DATA).sort((a,b) => parseInt(a) - parseInt(b));
+
+function overlapVenn(d, w=420, h=240) {
+  const cx1 = 150, cx2 = 270, cy = 120, r = 95;
+  const COL_T = '#377AB8', COL_M = '#D85A30';
+  let svg = `<svg viewBox="0 0 ${w} ${h}" xmlns="http://www.w3.org/2000/svg" style="font-family:inherit;font-size:12px;max-width:100%;height:auto;">`;
+  svg += `<circle cx="${cx1}" cy="${cy}" r="${r}" fill="${COL_T}" fill-opacity="0.32" stroke="${COL_T}" stroke-width="1.5"/>`;
+  svg += `<circle cx="${cx2}" cy="${cy}" r="${r}" fill="${COL_M}" fill-opacity="0.32" stroke="${COL_M}" stroke-width="1.5"/>`;
+  const pctT = d.t_total ? (100*d.t_private/d.t_total).toFixed(0) : 0;
+  const pctM = d.m_total ? (100*d.m_private/d.m_total).toFixed(0) : 0;
+  const pctST = d.shared_pct_of_t.toFixed(0), pctSM = d.shared_pct_of_m.toFixed(0);
+  svg += `<text x="${cx1-42}" y="${cy-4}" text-anchor="middle" fill="#1a4a7a" font-weight="600">${d.t_private}</text>`;
+  svg += `<text x="${cx1-42}" y="${cy+12}" text-anchor="middle" fill="#1a4a7a" font-size="10">T-only (${pctT}%)</text>`;
+  svg += `<text x="${cx2+42}" y="${cy-4}" text-anchor="middle" fill="#9a3a14" font-weight="600">${d.m_private}</text>`;
+  svg += `<text x="${cx2+42}" y="${cy+12}" text-anchor="middle" fill="#9a3a14" font-size="10">M-only (${pctM}%)</text>`;
+  svg += `<text x="${(cx1+cx2)/2}" y="${cy-4}" text-anchor="middle" fill="#222" font-weight="600">${d.shared}</text>`;
+  svg += `<text x="${(cx1+cx2)/2}" y="${cy+12}" text-anchor="middle" fill="#222" font-size="10">shared</text>`;
+  svg += `<text x="${cx1}" y="${cy-r-8}" text-anchor="middle" fill="${COL_T}" font-weight="600">Primary (T): ${d.t_total}</text>`;
+  svg += `<text x="${cx2}" y="${cy+r+20}" text-anchor="middle" fill="${COL_M}" font-weight="600">Recurrent (M): ${d.m_total}</text>`;
+  svg += `<text x="${(cx1+cx2)/2}" y="${h-6}" text-anchor="middle" fill="#888" font-size="10">shared = ${pctST}% of T · ${pctSM}% of M</text>`;
+  svg += '</svg>';
+  return svg;
+}
+
+function renderOverlap(pid) {
+  const d = OVERLAP_DATA[pid];
+  if (!d) return;
+  document.getElementById('overlap-venn').innerHTML = overlapVenn(d);
+  document.getElementById('overlap-box').innerHTML =
+      '<table style="font-size:12px;"><tbody>'
+    + `<tr><td>t_total</td><td style="text-align:right;"><strong>${d.t_total}</strong></td></tr>`
+    + `<tr><td>m_total</td><td style="text-align:right;"><strong>${d.m_total}</strong></td></tr>`
+    + `<tr><td>shared</td><td style="text-align:right;"><strong>${d.shared}</strong></td></tr>`
+    + `<tr><td>t_private</td><td style="text-align:right;"><strong>${d.t_private}</strong></td></tr>`
+    + `<tr><td>m_private</td><td style="text-align:right;"><strong>${d.m_private}</strong></td></tr>`
+    + `<tr><td>shared_pct_of_t</td><td style="text-align:right;"><strong>${d.shared_pct_of_t}%</strong></td></tr>`
+    + `<tr><td>shared_pct_of_m</td><td style="text-align:right;"><strong>${d.shared_pct_of_m}%</strong></td></tr>`
+    + '</tbody></table>';
+}
+
+(function initOverlap() {
+  const sel = document.getElementById('overlap-select');
+  if (!OVERLAP_KEYS.length) {
+    document.getElementById('overlap-box').innerHTML =
+      '<em style="color:#aaa;">Overlap data unavailable (Stage 1 paired_variant_overlap.tsv not provided).</em>';
+    return;
+  }
+  for (const k of OVERLAP_KEYS) {
+    const opt = document.createElement('option');
+    opt.value = k; opt.textContent = `Patient ${k}`;
+    sel.appendChild(opt);
+  }
+  sel.addEventListener('change', e => renderOverlap(e.target.value));
+  renderOverlap(OVERLAP_KEYS[0]);
+})();
+</script>
+"""
+
+
+def _stats_table_html(stats: pd.DataFrame, module: str) -> str:
+    """Render the paired_stats rows for one module as a compact HTML table."""
+    sub = stats[stats["module"] == module].copy()
+    if sub.empty:
+        return "<p style='color:#888;font-style:italic;'>No statistics for this module.</p>"
+    cols = ["metric", "n_pairs", "median_primary", "median_recurrent",
+            "median_delta", "mean_delta", "wilcoxon_stat", "p_value",
+            "p_value_adj_bh", "note"]
+    th = "".join(f"<th>{c}</th>" for c in cols)
+
+    def fmt(v: object) -> str:
+        if isinstance(v, float):
+            if pd.isna(v):
+                return "—"
+            return f"{v:.4g}"
+        return str(v)
+
+    body = "".join(
+        "<tr>" + "".join(f"<td>{fmt(r[c])}</td>" for c in cols) + "</tr>"
+        for _, r in sub.iterrows())
+    return f"<table><thead><tr>{th}</tr></thead><tbody>{body}</tbody></table>"
+
+
+def _df_table_html(df: pd.DataFrame, empty: str = "No data.") -> str:
+    """Render a full DataFrame as an HTML table (4 sig-fig floats)."""
+    if df is None or df.empty:
+        return f"<p style='color:#888;font-style:italic;'>{empty}</p>"
+    th = "".join(f"<th>{c}</th>" for c in df.columns)
+
+    def fmt(v: object) -> str:
+        if isinstance(v, float):
+            if pd.isna(v):
+                return "—"
+            return f"{v:.4g}"
+        return str(v)
+
+    body = "".join(
+        "<tr>" + "".join(f"<td>{fmt(r[c])}</td>" for c in df.columns) + "</tr>"
+        for _, r in df.iterrows())
+    return f'<div style="overflow-x:auto;">' \
+           f'<table><thead><tr>{th}</tr></thead><tbody>{body}</tbody></table></div>'
+
+
 def generate_report(cohort: pd.DataFrame, fs_cohort: pd.DataFrame,
                     summary: pd.DataFrame, paired: pd.DataFrame,
-                    landscape: pd.DataFrame, out_dir: Path, n_input_samples: int):
+                    landscape: pd.DataFrame, out_dir: Path, n_input_samples: int,
+                    mod3: pd.DataFrame, mod4: pd.DataFrame, mod5: pd.DataFrame,
+                    stage3_stats: pd.DataFrame, module_imgs: Dict[str, str],
+                    overlap_data: Dict[str, dict]):
     out_dir.mkdir(parents=True, exist_ok=True)
 
     if cohort.empty:
@@ -813,6 +1533,66 @@ def generate_report(cohort: pd.DataFrame, fs_cohort: pd.DataFrame,
     patient_data_json = json.dumps(build_patient_data(fs_cohort), separators=(",",":"))
     widget_block = WIDGET_HTML.replace("__PATIENT_DATA__", patient_data_json)
 
+    overlap_json = json.dumps(overlap_data, separators=(",", ":"))
+    overlap_block = OVERLAP_WIDGET_HTML.replace("__OVERLAP_DATA__", overlap_json)
+
+    # ── Module 3/4/5 sections ────────────────────────────────────────────────
+    module3_block = f"""
+<h2>Module 3 — NMD-sensitive mutation enrichment</h2>
+<p class="sub">
+  Variant-level NMD aggregation over truncating (frameshift) variants. Each
+  variant is classified once (worst-case across its peptides). NMD fraction =
+  sensitive / (sensitive + insensitive). Counts are deduplicated to the variant
+  level.
+</p>
+{_img(module_imgs.get("m3_paired",""), "M3 Fig 1. Paired NMD-sensitive fraction (FS), primary vs recurrent.")}
+{_img(module_imgs.get("m3_delta",""), "M3 Fig 2. ΔNMD fraction (recurrent − primary), sorted.")}
+{_img(module_imgs.get("m3_stacked",""), "M3 Fig 3. NMD-sensitive vs escape FS variants per sample.")}
+{_img(module_imgs.get("m3_scatter",""), "M3 Fig 4. Truncating burden vs NMD-sensitive count, coloured by timepoint.")}
+<h3>Per-sample NMD summary</h3>
+{_df_table_html(mod3, "No Module 3 data.")}
+<h3>Module 3 paired statistics</h3>
+{_stats_table_html(stage3_stats, "3")}
+"""
+
+    module4_block = f"""
+<h2>Module 4 — Neoepitope burden</h2>
+<p class="sub">
+  Per-sample binder burden across all candidate peptides. Strong &lt;50 nM,
+  Weak 50–500 nM, Non-binder ≥500 nM. Clonality from Tumor DNA VAF
+  (Clonal ≥0.30). fraction_clonal = clonal / (clonal + subclonal) over binders.
+</p>
+{_img(module_imgs.get("m4_paired",""), "M4 Fig 1. Paired total and strong binder burden.")}
+{_img(module_imgs.get("m4_stacked",""), "M4 Fig 2. Clonal vs subclonal binders per sample.")}
+{_img(module_imgs.get("m4_scatter",""), "M4 Fig 3. TMB (Stage 1, log) vs strong-binder burden.") if module_imgs.get("m4_scatter") else "<p class='note'>TMB-vs-neoepitope scatter skipped — Stage 1 summary not provided.</p>"}
+{_img(module_imgs.get("m4_delta",""), "M4 Fig 4. Δ strong binders (recurrent − primary), sorted.")}
+<h3>Per-sample neoepitope summary</h3>
+{_df_table_html(mod4, "No Module 4 data.")}
+<h3>Module 4 paired statistics</h3>
+{_stats_table_html(stage3_stats, "4")}
+"""
+
+    module5_block = f"""
+<h2>Module 5 — Neoepitopes by NMD <span style="font-size:12px;color:#888;">(the central mechanistic result)</span></h2>
+<p class="sub">
+  Neoepitopes (Strong/Weak binders) split by their variant's NMD class.
+  fraction_escape = escape / (escape + sensitive); UNCERTAIN/UNKNOWN excluded.
+  The headline figure tests whether recurrence shifts neoepitopes toward NMD
+  escape (immune visibility) or toward NMD-sensitive silencing.
+</p>
+<div style="border:2px solid #D85A30;border-radius:8px;padding:8px 12px;margin:12px 0;background:#fffaf7;">
+  <h3 style="margin-top:4px;color:#9a3a14;">Headline figure — paired NMD-escape fraction (strong binders)</h3>
+  {_img(module_imgs.get("m5_paired",""), "M5 Fig 1 (HEADLINE). Paired fraction_escape_strong, primary vs recurrent, with p-value and median Δ.")}
+</div>
+{_img(module_imgs.get("m5_stacked",""), "M5 Fig 2. NMD-sensitive vs escape strong neoepitopes per sample.")}
+{_img(module_imgs.get("m5_delta",""), "M5 Fig 3. Δ fraction_escape_strong (recurrent − primary), sorted.")}
+{_img(module_imgs.get("m5_paired_count",""), "M5 Fig 4. Paired NMD-sensitive neoepitope count (strong).")}
+<h3>Per-sample neoepitope-by-NMD summary</h3>
+{_df_table_html(mod5, "No Module 5 data.")}
+<h3>Module 5 paired statistics</h3>
+{_stats_table_html(stage3_stats, "5")}
+"""
+
     html = f"""<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
 <title>GBM NMD Cohort Report</title><style>{CSS}</style></head>
 <body><div class="page">
@@ -886,6 +1666,14 @@ def generate_report(cohort: pd.DataFrame, fs_cohort: pd.DataFrame,
 <p class="sub">Per-patient counts (sorted by ΔTIER1, then ΔTotal):</p>
 {_tbl(paired, list(paired.columns), "No paired data.")}
 
+{module3_block}
+
+{module4_block}
+
+{module5_block}
+
+{overlap_block}
+
 {widget_block}
 
 <h2>IC50 distribution by NMD class — top 50 strongest binders (FS only)</h2>
@@ -933,6 +1721,10 @@ def main():
                     help="Directory containing per-sample subdirs (each with nmd_scored_candidates.tsv)")
     ap.add_argument("--out_dir", required=True, type=Path,
                     help="Where cohort_*.{tsv,html} are written")
+    ap.add_argument("--stage1_summary", type=Path, default=None,
+                    help="Stage 1 sample_mutation_summary.tsv (for truncating_total / TMB joins)")
+    ap.add_argument("--paired_overlap", type=Path, default=None,
+                    help="Stage 1 paired_variant_overlap.tsv (for the overlap widget)")
     args = ap.parse_args()
 
     args.out_dir.mkdir(parents=True, exist_ok=True)
@@ -940,8 +1732,31 @@ def main():
     print(f"\n{'='*60}\n  GBM Pipeline — Stage 3 cohort summary\n{'='*60}\n")
     print(f"[INFO] Reading per-sample dirs from: {args.input_dir}")
 
+    # ── optional Stage 1 joins (graceful fallback) ──────────────────────────
+    stage1: Optional[pd.DataFrame] = None
+    if args.stage1_summary and args.stage1_summary.is_file():
+        stage1 = pd.read_csv(args.stage1_summary, sep="\t")
+        stage1["sample"] = stage1["sample"].astype(str)
+        print(f"[INFO] Stage 1 summary loaded: {len(stage1)} samples")
+    elif args.stage1_summary:
+        print(f"[WARN] Stage 1 summary not found at {args.stage1_summary}; "
+              "stage1-dependent columns will be NaN")
+    else:
+        print("[INFO] No --stage1_summary given; stage1-dependent columns will be NaN")
+
+    overlap_df: Optional[pd.DataFrame] = None
+    if args.paired_overlap and args.paired_overlap.is_file():
+        overlap_df = pd.read_csv(args.paired_overlap, sep="\t")
+        print(f"[INFO] Paired overlap loaded: {len(overlap_df)} patients")
+    elif args.paired_overlap:
+        print(f"[WARN] Paired overlap not found at {args.paired_overlap}; "
+              "overlap widget will be empty")
+
     n_input_samples = sum(1 for p in args.input_dir.iterdir() if p.is_dir() and SAMPLE_RE.match(p.name))
     cohort = load_cohort(args.input_dir)
+
+    # Augment candidates with binder_class + clonality (appended columns).
+    cohort = augment_candidates(cohort)
 
     fs_cohort = cohort[cohort["Variant Type"] == "FS"].copy() if not cohort.empty else cohort
     print(f"[INFO] Filtered to FS-only: {len(fs_cohort)} candidates from {fs_cohort['sample'].nunique() if not fs_cohort.empty else 0} samples")
@@ -950,6 +1765,37 @@ def main():
     summary   = cohort_summary(cohort, fs_cohort, n_input_samples)
     paired    = per_patient_paired(fs_cohort)
 
+    # ── Max Modules 3/4/5 ────────────────────────────────────────────────────
+    variant_tbl = variant_nmd_table(cohort)
+    mod3 = module3_nmd_summary(cohort, variant_tbl, stage1) if not cohort.empty else pd.DataFrame()
+    mod4 = module4_neoepitope_summary(cohort) if not cohort.empty else pd.DataFrame()
+    mod5 = module5_neoepitope_nmd_summary(cohort, variant_tbl) if not cohort.empty else pd.DataFrame()
+
+    # Wide per-sample frame for paired stats + plots.
+    have_stage1 = stage1 is not None
+    if not cohort.empty:
+        wide = mod3.merge(mod4, on=["sample", "patient", "timepoint"]) \
+                   .merge(mod5, on=["sample", "patient", "timepoint"])
+        if have_stage1:
+            tmb = stage1[["sample"]].copy()
+            for col in ("tmb_per_mb", "sbs11_pct", "snv", "indel", "coding"):
+                if col in stage1.columns:
+                    tmb[col] = stage1[col]
+            wide = wide.merge(tmb, on="sample", how="left")
+        stage3_stats = compute_paired_stats_stage3(wide)
+        module_imgs = make_module_plots(wide, stage3_stats, args.out_dir, have_stage1)
+    else:
+        wide = pd.DataFrame()
+        stage3_stats = pd.DataFrame(columns=["module", "metric", "n_pairs",
+                                             "median_primary", "median_recurrent",
+                                             "median_delta", "mean_delta",
+                                             "wilcoxon_stat", "p_value",
+                                             "p_value_adj_bh", "note"])
+        module_imgs = {}
+
+    overlap_data = build_overlap_data(overlap_df, variant_tbl, stage1)
+
+    # ── write TSVs (existing + new; never delete existing outputs) ───────────
     if not cohort.empty:
         cohort.to_csv(args.out_dir / "cohort_candidates.tsv", sep="\t", index=False)
         if not fs_cohort.empty:
@@ -958,8 +1804,14 @@ def main():
     summary.to_csv  (args.out_dir / "cohort_summary.tsv",  sep="\t", index=False)
     paired.to_csv   (args.out_dir / "cohort_paired.tsv",   sep="\t", index=False)
     landscape.to_csv(args.out_dir / "cohort_landscape.tsv", sep="\t", index=False)
+    mod3.to_csv(args.out_dir / "per_sample_nmd_summary.tsv", sep="\t", index=False)
+    mod4.to_csv(args.out_dir / "per_sample_neoepitope_summary.tsv", sep="\t", index=False)
+    mod5.to_csv(args.out_dir / "per_sample_neoepitope_nmd_summary.tsv", sep="\t", index=False)
+    stage3_stats.to_csv(args.out_dir / "paired_stats_stage3.tsv", sep="\t", index=False)
 
-    generate_report(cohort, fs_cohort, summary, paired, landscape, args.out_dir, n_input_samples)
+    generate_report(cohort, fs_cohort, summary, paired, landscape, args.out_dir,
+                    n_input_samples, mod3, mod4, mod5, stage3_stats, module_imgs,
+                    overlap_data)
 
     print(f"\n{'='*60}\n  Cohort summary done. Output: {args.out_dir.resolve()}\n{'='*60}\n")
 
