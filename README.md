@@ -1,6 +1,6 @@
 # GBM NMD-Neoantigen Pipeline
 
-A computational pipeline for identifying NMD-sensitive immunogenic mutations in primary and recurrent Glioblastoma (GBM). Developed as part of a Master's thesis at ZHAW.
+A computational pipeline for identifying NMD-sensitive immunogenic mutations in primary and recurrent Glioblastoma (GBM). Developed as part of a Master's thesis at ZHAW. While the focus is GBM NMD/neoantigen biology, the paired primary/recurrent design and the five analytical modules generalise to any paired-cohort study — any two matched timepoints or conditions with per-patient VCFs.
 
 **Thesis:** Identifying NMD-Sensitive Immunogenic Mutations in Primary and Recurrent Glioblastoma  
 **Author:** Luigi Palese  
@@ -20,11 +20,25 @@ The pipeline runs in three stages, all submitted by a single master SLURM script
 
 | Stage | Script | Function |
 |-------|--------|----------|
-| **1** | `gbm_analysis.py` | Mutation landscape: VCF parsing, mutation burden, paired T/M comparison, gene-level recurrence, HLA typing summary, TMZ signature analysis |
+| **1** | `gbm_analysis.py` | Mutation landscape: VCF parsing, mutation burden, paired T/M comparison, gene-level recurrence, HLA typing summary, SBS11 (temozolomide) mutational-signature analysis |
 | **2** | `nextflow-pvacseq` | NMD-relevant variant filter → VEP v113 annotation (NMD plugin) + pVACseq neoantigen prediction (MHC Class I, 8 algorithms) |
 | **3** | `nmd_scoring.py` + `nmd_cohort_summary.py` | NMD sensitivity scoring per sample (ensemble of VEP NMD plugin + Lindeboom rules) and cohort-level aggregate report |
 
 A single `sbatch master_pipeline.sh` produces a complete, reproducible run with all three stages chained together.
+
+---
+
+## Analytical modules
+
+The three stages implement five analytical modules. Modules 1–2 run in Stage 1 (`gbm_analysis.py`); Modules 3–5 run in Stage 3 (`nmd_scoring.py` per sample, aggregated by `nmd_cohort_summary.py`). Each module emits a per-sample summary table and a headline plot.
+
+| # | Module | What it tests | Per-sample TSV | Headline plot |
+|---|--------|---------------|----------------|---------------|
+| **1** | Mutation burden analysis (Stage 1) | Whether tumour mutation burden (TMB) shifts between primary (T) and recurrent (M) timepoints across paired patients. | `1_gbm_analysis/sample_mutation_summary.tsv` | `plot_paired_tmb.png` |
+| **2** | Truncating mutation enrichment (Stage 1) | Whether the fraction of truncating variants (frameshift / stop-gained / splice / start-lost) is enriched at recurrence — the PTC-generating events NMD acts on. | `1_gbm_analysis/sample_mutation_summary.tsv` | `plot_paired_truncating_fraction.png` |
+| **3** | NMD-sensitive mutation analysis (Stage 3) | Whether the count of NMD-sensitive truncating variants (VEP NMD plugin + Lindeboom ensemble) changes between T and M. | `3_nmd_analysis/cohort/per_sample_nmd_summary.tsv` | `m3_nmd_sensitive_paired.png` |
+| **4** | Neoepitope burden analysis (Stage 3) | Whether the per-sample neoepitope (neoantigen) burden from pVACseq differs between timepoints. | `3_nmd_analysis/cohort/per_sample_neoepitope_summary.tsv` | `m4_neoepitope_burden_paired.png` |
+| **5** | Neoepitopes stratified by NMD status (Stage 3) | Whether neoepitopes arising from NMD-sensitive vs NMD-insensitive transcripts diverge between T and M — the core thesis hypothesis (epitopes silenced by NMD). | `3_nmd_analysis/cohort/per_sample_neoepitope_nmd_summary.tsv` | `m5_neoepitope_by_nmd_paired.png` |
 
 ---
 
@@ -155,14 +169,14 @@ Every run produces a single timestamped directory with three sub-folders, one pe
 results/
 └── run_<TIMESTAMP>/
     ├── 1_gbm_analysis/                          ← Stage 1
-    │   ├── report.html                          ← interactive HTML report
-    │   ├── summary_mutation_burden.tsv
-    │   ├── all_fs_sg_variants.tsv
-    │   ├── paired_variant_overlap.tsv
+    │   ├── stage1_report.html                   ← interactive HTML report
+    │   ├── sample_mutation_summary.tsv          ← per-sample burden, truncating fraction, SBS11
+    │   ├── paired_variant_overlap.tsv           ← T/M shared-vs-private counts (extended)
+    │   ├── paired_stats.tsv                     ← Module 1+2 paired Wilcoxon + BH-FDR
+    │   ├── all_truncating_variants.tsv          ← every truncating variant (FS/SG/splice/start-lost)
     │   ├── gene_recurrence.tsv
-    │   ├── tmz_signature.tsv
     │   ├── hla_typing_summary.tsv
-    │   └── plot_*.png
+    │   └── plot_*.png                           ← 8 headline PNGs (300 dpi)
     │
     ├── 2_pvacseq/                               ← Stage 2 (Nextflow)
     │   ├── ensemblvep/                          ← VEP-annotated VCFs per sample
@@ -177,14 +191,55 @@ results/
         │   ├── nmd_hla_breakdown.tsv
         │   └── report_nmd.html                  ← per-sample HTML
         └── cohort/                              ← cohort-level summary
-            ├── cohort_candidates.tsv
+            ├── cohort_candidates.tsv            ← all candidates (101 cols; adds binder_class + clonality)
             ├── cohort_summary.tsv
             ├── cohort_paired.tsv                ← T (primary) vs M (recurrent) per patient
             ├── cohort_tier1.tsv
-            └── cohort_report.html               ← MAIN cohort HTML
+            ├── per_sample_nmd_summary.tsv             ← Module 3 per-sample table
+            ├── per_sample_neoepitope_summary.tsv      ← Module 4 per-sample table
+            ├── per_sample_neoepitope_nmd_summary.tsv  ← Module 5 per-sample table
+            ├── paired_stats_stage3.tsv                ← Module 3/4/5 paired Wilcoxon + BH-FDR
+            ├── m3_*.png m4_*.png m5_*.png             ← 12 module plots (300 dpi)
+            └── cohort_report.html               ← MAIN cohort HTML (~2.8 MB: 5 modules +
+                                                   per-pair overlap widget + per-patient drill-down)
 ```
 
 The cohort report (`3_nmd_analysis/cohort/cohort_report.html`) is the primary deliverable: a single HTML with overview cards, tier distributions, T-vs-M paired comparison per patient, top recurrent genes, HLA breakdown, and ranked TIER1 candidates across the cohort.
+
+### Per-sample summary tables
+
+The refactored pipeline writes one row per sample in each of these tables, the inputs to the paired statistics:
+
+```
+results/run_<TS>/1_gbm_analysis/sample_mutation_summary.tsv          # per-sample burden + truncating + SBS11
+results/run_<TS>/1_gbm_analysis/paired_variant_overlap.tsv           # T/M shared-vs-private counts
+results/run_<TS>/1_gbm_analysis/paired_stats.tsv                     # Module 1+2 paired Wilcoxon + BH-FDR
+results/run_<TS>/1_gbm_analysis/all_truncating_variants.tsv          # every truncating variant (FS/SG/splice/start-lost)
+results/run_<TS>/3_nmd_analysis/cohort/per_sample_nmd_summary.tsv             # NEW — Module 3
+results/run_<TS>/3_nmd_analysis/cohort/per_sample_neoepitope_summary.tsv      # NEW — Module 4
+results/run_<TS>/3_nmd_analysis/cohort/per_sample_neoepitope_nmd_summary.tsv  # NEW — Module 5
+results/run_<TS>/3_nmd_analysis/cohort/paired_stats_stage3.tsv                # NEW — Module 3/4/5 Wilcoxon
+```
+
+The temozolomide (SBS11) mutational signature is reported as the `sbs11_count` / `sbs11_pct` columns of `sample_mutation_summary.tsv` (SBS11 = C>T at CpC, the COSMIC temozolomide signature).
+
+### Statistical methodology
+
+- **Paired test.** Every primary-vs-recurrent comparison uses the Wilcoxon signed-rank test (`scipy.stats.wilcoxon`) over patients with both timepoints.
+- **Multiple-testing correction.** Benjamini–Hochberg FDR is applied *within each module family*: Modules 1+2 form one family in Stage 1 (`paired_stats.tsv`), and Modules 3+4+5 form one family in Stage 3 (`paired_stats_stage3.tsv`).
+- **Usable pairs.** Reported `n_pairs` reflects only usable pairs — patients missing a timepoint, or with an undefined denominator for a given metric, are dropped from that test.
+- **Effect sizes.** Each test reports `median_delta` and `mean_delta` (recurrent − primary) alongside the raw and BH-adjusted p-values, so direction and magnitude are visible independent of significance.
+
+### TMB normalisation
+
+- `TMB_per_Mb` is computed as truncating/total variant counts divided by a callable-region denominator taken from `config.sh`'s `TMB_DENOMINATOR_MB` (default **30 Mb**, assuming standard whole-exome capture).
+- When a real capture-kit BED file is available, compute the empirical denominator:
+
+  ```bash
+  bedtools genomecov -bg -i target.bed | awk '{s += $3-$2} END {print s/1e6}'
+  ```
+
+- Set the result as `TMB_DENOMINATOR_MB` in `config.sh` and re-run Stage 1 (`sbatch pipeline/slurm/slurm_python.sh`, ~1 min) to refresh the TMB columns. The value is exported from `config.sh` so the Stage 1 Python child reads it from the environment.
 
 ---
 
@@ -273,6 +328,8 @@ The pipeline has been validated by three escalating destructive reproducibility 
 
 All three runs produced **bit-for-bit identical** results across all 56 samples (338 total epitopes), with identical gold-standard hits in 11_T (ITGA4 frameshift YCIKLIHIV at HLA-C*12:03, BRAT1 frameshift STMSFCGTL at HLA-C*12:03).
 
+**Integrity gate.** The reproducibility guarantee is enforced, not assumed. `setup.sh` STEP 10 is a hard gate: after building the conda environments it imports every critical package (scipy, Bio, pandas, pvactools, …) and verifies the pVACtools `sys.executable` patch, exiting non-zero and naming the offending package if anything is missing. This closes the failure mode behind the earlier `20260630` production run, where a silent environment breakage (`No module named 'scipy'` in Stage 1; `No module named 'Bio'` in Stage 2) was reported as a successful setup. With this gate in place a fresh `git clone` → `setup.sh` → `master_pipeline.sh` reliably reproduces the byte-equivalent baseline, and a corrupted environment fails loudly at setup time rather than silently mid-run.
+
 ---
 
 ## Troubleshooting
@@ -306,7 +363,11 @@ If you use this pipeline, please cite:
 
 - **pVACtools**: Hundal et al. (2020) *Cancer Immunology Research* — pVACtools: A Computational Toolkit to Identify and Visualize Cancer Neoantigens
 - **VEP**: McLaren et al. (2016) *Genome Biology* — The Ensembl Variant Effect Predictor
+- **VEP NMD plugin**: Coelho et al. (2020) *NAR Genomics & Bioinformatics* — Nonsense-mediated mRNA decay prediction in the Ensembl Variant Effect Predictor
 - **NMD rules**: Lindeboom et al. (2019) *Nature Genetics* — The rules and impact of nonsense-mediated mRNA decay in human cancers
+- **Mutational signatures (SBS11)**: Alexandrov et al. (2020) *Nature* — The repertoire of mutational signatures in human cancer (COSMIC SBS11 = temozolomide exposure)
+- **Paired statistics**: Virtanen et al. (2020) *Nature Methods* — SciPy 1.0 (`scipy.stats.wilcoxon`, Wilcoxon signed-rank test for all paired primary-vs-recurrent comparisons)
+- **Multiple-testing correction**: Benjamini & Hochberg (1995) *J. R. Stat. Soc. B* — Controlling the false discovery rate (BH-FDR applied within each module family)
 
 ---
 

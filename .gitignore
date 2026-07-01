@@ -44,6 +44,9 @@ data/hla_typing_classI.csv
 
 # Debugging artifacts and intermediate run state
 Slurm-*/
+*_diag.out
+*_pip_freeze_*.txt
+*_drift.txt
 *.bak
 *.bak[0-9]
 *.bak_*
