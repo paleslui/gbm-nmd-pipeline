@@ -133,9 +133,17 @@ if [ -d "$NF_ENV_PATH" ]; then
     echo "[OK] nf_pvacseq env already exists"
 else
     echo "[INFO] Building nf_pvacseq env with mamba (Nextflow + Java)..."
+    # ── level-3 reproducibility fix: scipy and numpy MUST be explicit.
+    #    Stage 1 (gbm_analysis.py) does `from scipy.stats import spearmanr,
+    #    wilcoxon` and `import numpy as np`; Stage 3 (nmd_scoring.py,
+    #    nmd_cohort_summary.py) also use numpy. Previously scipy came in only
+    #    transitively via seaborn and numpy via pandas — if that transitive
+    #    edge ever drops, Stage 1 dies with "No module named 'scipy'".
+    #    Full direct-import set of the Python stages: cyvcf2, scipy, numpy,
+    #    pandas, matplotlib, seaborn. Do NOT remove scipy/numpy.
     mamba create -y -p $NF_ENV_PATH \
         -c conda-forge -c bioconda \
-        nextflow=25.10.* openjdk python=3.11 samtools pandas matplotlib seaborn cyvcf2
+        nextflow=25.10.* openjdk python=3.11 samtools pandas numpy scipy matplotlib seaborn cyvcf2
     echo "[OK] nf_pvacseq environment created"
 fi
 
@@ -198,15 +206,68 @@ fi
 
 
 # ── Step 4b: Patch pvactools to use sys.executable for MHCnuggetsI ───────────
+# ── level-3 reproducibility fix ──────────────────────────────────────────────
+# pvactools' MHCnuggets predictor spawns a child interpreter with a HARDCODED
+# bare "python":
+#     prediction_class.py:  arguments = ["python", script, ...]   # runs call_mhcnuggets.py
+# On this cluster `module load lsfm-init-miniconda/1.0.0` leaves the cluster
+# miniconda3-4.12.0 (Python 3.9, NO biopython) on PATH even after conda
+# activate, so that bare "python" resolves to the WRONG interpreter and every
+# pVACseq task dies with "ModuleNotFoundError: No module named 'Bio'" (56
+# samples x 3 retries = 168 failures in the 20260630 run). Rewriting it to
+# sys.executable binds the child to the SAME interpreter as the parent pvacseq
+# process (env-4a82), independent of PATH. This patch is LOST on every clean
+# rebuild of env-4a82, so setup.sh MUST re-apply it every time.
+#
+# NOTE: the previous idempotency guard `grep -q "sys.executable"` was BROKEN —
+# prediction_class.py already contains an unrelated sys.executable at line ~78
+# (the IEDB standalone call), so the guard always matched and the real line-156
+# MHCnuggets patch was NEVER applied. We now key off the bad pattern itself.
 echo ""
-echo "[STEP 4b] Patching pvactools MHCnuggets to use correct Python..."
-PRED_CLASS=$PVACSEQ_ENV/lib/python3.11/site-packages/pvactools/lib/prediction_class.py
-if grep -q "sys.executable" $PRED_CLASS; then
-    echo "[OK] pvactools already patched"
-else
-    sed -i 's/arguments = \["python", script,/arguments = [sys.executable, script,/' $PRED_CLASS
-    echo "[OK] pvactools patched"
+echo "[STEP 4b] Patching pvactools MHCnuggets to use correct Python (sys.executable)..."
+PATCH_COUNT=0
+while IFS= read -r PRED_CLASS; do
+    [ -f "$PRED_CLASS" ] || continue
+    # ensure `import sys` exists (it does upstream, but be defensive)
+    if ! grep -q '^import sys' "$PRED_CLASS"; then
+        sed -i '1i import sys' "$PRED_CLASS"
+    fi
+    if grep -q 'arguments = \["python", script,' "$PRED_CLASS"; then
+        sed -i 's/arguments = \["python", script,/arguments = [sys.executable, script,/' "$PRED_CLASS"
+        echo "[OK] patched: $PRED_CLASS"
+        PATCH_COUNT=$((PATCH_COUNT+1))
+    elif grep -q 'arguments = \[sys.executable, script,' "$PRED_CLASS"; then
+        echo "[OK] already patched: $PRED_CLASS"
+    else
+        echo "[WARN] MHCnuggets invocation pattern not found in $PRED_CLASS — pvactools layout may have changed; verify manually" >&2
+    fi
+done < <(find "$PVACSEQ_ENV"/lib/python*/site-packages/pvactools -name prediction_class.py -path '*pvactools/lib*' 2>/dev/null)
+echo "[OK] pvactools sys.executable patch applied to $PATCH_COUNT file(s)"
+
+# Verify NO bare-"python" subprocess spawns remain anywhere in pvactools.
+LEFTOVER=$(grep -rln 'arguments = \["python"' "$PVACSEQ_ENV"/lib/python*/site-packages/pvactools 2>/dev/null || true)
+if [ -n "$LEFTOVER" ]; then
+    echo "[ERROR] Unpatched bare-'python' subprocess spawn(s) remain in pvactools:" >&2
+    echo "$LEFTOVER" >&2
+    exit 1
 fi
+
+# ── Step 4b2: Make transitive pip deps of pvactools EXPLICIT ──────────────────
+# ── level-3 reproducibility fix ──────────────────────────────────────────────
+# biopython (Bio), pandas and requests are imported directly by the pvactools
+# lib files (call_mhcnuggets.py: `from Bio import SeqIO`; prediction_class.py:
+# Bio/pandas/requests) but are only pulled in TRANSITIVELY by the pvactools pip
+# install. We deliberately do NOT add them to environment.yml, because Nextflow
+# derives the env directory name (env-4a82...) from an md5/murmur hash of the
+# YAML content — editing the YAML would change the hash, so Nextflow would
+# rebuild a NEW, unpatched env at runtime and this whole fix would be bypassed.
+# Instead we pin them here via pip (idempotent: already-satisfied is a no-op),
+# which keeps the env hash stable while guaranteeing the packages are present.
+echo ""
+echo "[STEP 4b2] Pinning pvactools transitive deps explicitly (biopython, pandas, requests)..."
+"$PVACSEQ_ENV/bin/python" -m pip install --no-input --quiet \
+    'biopython==1.77' 'pandas==2.0.3' 'requests==2.33.1'
+echo "[OK] pvactools transitive deps pinned"
 
 # ── Step 4c: Download MHCflurry models ───────────────────────────────────────
 echo ""
@@ -345,6 +406,79 @@ echo "[STEP 9] Patching pVACseq Nextflow module (cluster-portability fix)..."
 # IEDB to node-local scratch before invoking pvacseq run. Idempotent.
 python3 "$BASE/pipeline/scripts/patch_pvacseq_module.py" \
     "$NF_PIPELINE/modules/local/pvacseq/main.nf"
+
+
+# ── Step 10: Environment integrity check (HARD GATE) ─────────────────────────
+# ── level-3 reproducibility fix ──────────────────────────────────────────────
+# The two production failures of the 20260630 run (Stage 1 "No module named
+# 'scipy'"; Stage 2 "No module named 'Bio'" x168) were both silent env-setup
+# breakages that setup.sh happily reported as success. This step turns env
+# integrity into a HARD FAILURE: if any critical import fails, or the pvactools
+# sys.executable patch is missing, setup.sh exits non-zero and names the
+# offending package(s). No more silent success.
+echo ""
+echo "[STEP 10] Environment integrity check..."
+
+INTEGRITY_FAIL=0
+
+# 10a: pVACseq env (env-4a82) — used by Nextflow pvacseq/configure_pvacseq tasks
+echo "[INFO] Checking pVACseq env: $PVACSEQ_ENV"
+"$PVACSEQ_ENV/bin/python" - <<'PYEOF' || INTEGRITY_FAIL=1
+import importlib, sys
+mods = ["Bio", "pvactools", "mhcflurry", "tensorflow", "pandas", "requests"]
+bad = []
+for m in mods:
+    try:
+        importlib.import_module(m)
+    except Exception as e:
+        bad.append(f"{m}: {e.__class__.__name__}: {e}")
+if bad:
+    sys.stderr.write("[ERROR] pVACseq env failed critical imports:\n  " + "\n  ".join(bad) + "\n")
+    sys.exit(1)
+print("[OK] pVACseq env imports: " + ", ".join(mods))
+PYEOF
+
+# 10b: verify the MHCnuggets sys.executable patch actually landed
+if grep -rq 'arguments = \["python", script,' "$PVACSEQ_ENV"/lib/python*/site-packages/pvactools 2>/dev/null; then
+    echo "[ERROR] pvactools still contains an unpatched bare-'python' MHCnuggets spawn" >&2
+    INTEGRITY_FAIL=1
+elif grep -rq 'arguments = \[sys.executable, script,' "$PVACSEQ_ENV"/lib/python*/site-packages/pvactools 2>/dev/null; then
+    echo "[OK] pvactools MHCnuggets spawn uses sys.executable"
+else
+    echo "[ERROR] Could not confirm the pvactools MHCnuggets spawn patch (pattern missing)" >&2
+    INTEGRITY_FAIL=1
+fi
+
+# 10c: functional check — the child interpreter used by MHCnuggets must import Bio
+"$PVACSEQ_ENV/bin/python" -c "import sys, subprocess; subprocess.run([sys.executable, '-c', 'import Bio'], check=True)" 2>/dev/null \
+    && echo "[OK] MHCnuggets child interpreter (sys.executable) imports Bio" \
+    || { echo "[ERROR] MHCnuggets child interpreter cannot import Bio" >&2; INTEGRITY_FAIL=1; }
+
+# 10d: nf_pvacseq env — used by Stage 1 (gbm_analysis) and Stage 3 (nmd_*)
+echo "[INFO] Checking nf_pvacseq env: $NF_ENV_PATH"
+"$NF_ENV_PATH/bin/python" - <<'PYEOF' || INTEGRITY_FAIL=1
+import importlib, sys
+mods = ["scipy", "pandas", "numpy", "matplotlib", "seaborn", "cyvcf2"]
+bad = []
+for m in mods:
+    try:
+        importlib.import_module(m)
+    except Exception as e:
+        bad.append(f"{m}: {e.__class__.__name__}: {e}")
+if bad:
+    sys.stderr.write("[ERROR] nf_pvacseq env failed critical imports:\n  " + "\n  ".join(bad) + "\n")
+    sys.exit(1)
+print("[OK] nf_pvacseq env imports: " + ", ".join(mods))
+PYEOF
+
+if [ "$INTEGRITY_FAIL" -ne 0 ]; then
+    echo ""
+    echo "[FATAL] Environment integrity check FAILED — see [ERROR] lines above." >&2
+    echo "        The pipeline WILL fail at runtime; refusing to report success." >&2
+    exit 1
+fi
+echo "[STEP 10 OK] All Python envs pass integrity check"
+
 
 # ── Done ──────────────────────────────────────────────────────────────────────
 echo ""
