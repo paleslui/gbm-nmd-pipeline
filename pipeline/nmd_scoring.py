@@ -60,6 +60,20 @@ TRUNCATING = ['stop_gained', 'frameshift', 'stop_lost', 'start_lost',
 # ═════════════════════════════════════════════════════════════════════════════
 
 def parse_csq_header(vcf_path: Path) -> list:
+    """Extract the ordered CSQ subfield names from a VEP-annotated VCF header.
+
+    VEP packs its per-transcript annotations into a single INFO/CSQ field whose
+    layout is declared once in the '##INFO=<ID=CSQ...Format: ...>' header line.
+    Reading that declaration lets downstream code zip each pipe-delimited CSQ
+    entry back into a named dict.
+
+    Args:
+        vcf_path (Path): Path to the VCF (plain or .gz); only the header is read.
+
+    Returns:
+        list: CSQ subfield names in file order (e.g. ['Allele', 'Consequence',
+            ..., 'NMD', 'CANONICAL']); empty list if no CSQ header is found.
+    """
     opener = gzip.open if str(vcf_path).endswith('.gz') else open
     with opener(vcf_path, 'rt') as fh:
         for line in fh:
@@ -70,6 +84,21 @@ def parse_csq_header(vcf_path: Path) -> list:
 
 
 def parse_vep_vcf(vcf_path: Path) -> dict:
+    """Parse a VEP-annotated VCF into a variant -> transcript-annotations index.
+
+    Reads every data line, splits the INFO/CSQ field into one dict per
+    transcript consequence (keyed by the names from parse_csq_header), and
+    indexes them by variant coordinate so score_candidates can look up the
+    VEP/NMD annotation for each pVACseq candidate.
+
+    Args:
+        vcf_path (Path): Path to the VEP-annotated VCF (plain or gzipped).
+
+    Returns:
+        dict: Maps (chrom, pos, ref, alt) -> list of per-transcript CSQ dicts.
+            Empty dict if the CSQ header cannot be parsed, in which case NMD
+            plugin scoring is skipped and scoring falls back to Lindeboom rules.
+    """
     fields = parse_csq_header(vcf_path)
     if not fields:
         print("[WARN] Could not parse CSQ header — VEP NMD plugin scoring skipped")
@@ -105,6 +134,21 @@ def parse_vep_vcf(vcf_path: Path) -> dict:
 # ═════════════════════════════════════════════════════════════════════════════
 
 def score_nmd_vep_plugin(transcripts: list) -> str:
+    """Classify NMD sensitivity from the VEP NMD plugin field (Method 1).
+
+    Picks the canonical protein-coding transcript (or the first available) and,
+    for truncating consequences only, reads its NMD annotation: an empty NMD
+    field on a truncating variant means NMD is triggered (SENSITIVE), whereas an
+    'NMD_escaping_variant' value means the PTC escapes surveillance (INSENSITIVE).
+
+    Args:
+        transcripts (list): Per-transcript CSQ dicts for one variant, as produced
+            by parse_vep_vcf.
+
+    Returns:
+        str: 'SENSITIVE', 'INSENSITIVE', or 'UNKNOWN' (non-truncating variant,
+            missing NMD field, or no transcript data).
+    """
     if not transcripts:
         return 'UNKNOWN'
     canon = [t for t in transcripts if t.get('CANONICAL') == 'YES'
@@ -227,6 +271,26 @@ RULE_EXPLANATIONS = {
 
 
 def score_candidates(pvacseq_df: pd.DataFrame, vep_variants: dict) -> pd.DataFrame:
+    """Annotate every pVACseq candidate with NMD class, confidence and tier.
+
+    For each candidate row, looks up its VEP transcript annotations by coordinate
+    (trying pos and pos+1 to absorb VCF/pVACseq off-by-one indel coordinates),
+    runs both NMD methods (VEP plugin + Lindeboom rules), reconciles them via
+    ensemble_nmd, and assigns a priority tier by combining NMD consensus with
+    binding affinity (Best MT IC50): Tier 1 = NMD-sensitive & <50 nM,
+    Tier 2 = NMD-sensitive & <500 nM, Tier 3 = NMD-insensitive control & <500 nM.
+
+    Args:
+        pvacseq_df (pd.DataFrame): pVACseq filtered candidates for one sample.
+        vep_variants (dict): Variant -> transcript-annotation index from
+            parse_vep_vcf; empty when no VEP VCF was supplied.
+
+    Returns:
+        pd.DataFrame: The input rows plus NMD scoring columns (nmd_vep_plugin,
+            nmd_rules, nmd_consensus, nmd_confidence, nmd_confidence_score,
+            priority_tier, IC50 fields, etc.). Empty (column-less) if the input
+            has no rows.
+    """
     results = []
     for _, row in pvacseq_df.iterrows():
         chrom, pos, ref, alt = row['Chromosome'], int(row['Start']), row['Reference'], row['Variant']
@@ -294,6 +358,18 @@ def hla_allele_breakdown(scored_df: pd.DataFrame) -> pd.DataFrame:
 # ═════════════════════════════════════════════════════════════════════════════
 
 def _b64fig(fig) -> str:
+    """Render a matplotlib figure to a base64 PNG data URI for inline HTML.
+
+    Saves the figure as PNG to an in-memory buffer, closes it to free memory, and
+    returns a 'data:image/png;base64,...' string so the report stays
+    self-contained (no external image files).
+
+    Args:
+        fig: A matplotlib Figure.
+
+    Returns:
+        str: A base64-encoded PNG data URI usable directly as an <img> src.
+    """
     buf = io.BytesIO()
     fig.savefig(buf, format="png", dpi=150, bbox_inches="tight")
     plt.close(fig)
@@ -412,6 +488,20 @@ def plot_confidence(scored_df: pd.DataFrame) -> str:
 # ═════════════════════════════════════════════════════════════════════════════
 
 def generate_report(scored_df: pd.DataFrame, out_dir: Path):
+    """Build and write the self-contained per-sample NMD HTML report.
+
+    Renders the four summary plots as inline base64 images, computes the headline
+    counts (tiers, NMD classes, method disagreements, per-HLA breakdown), and
+    writes report_nmd.html to out_dir.
+
+    Args:
+        scored_df (pd.DataFrame): Scored candidates from score_candidates
+            (assumed non-empty; empty samples are short-circuited in main()).
+        out_dir (Path): Directory to write report_nmd.html into.
+
+    Returns:
+        None. Writes report_nmd.html as a side effect.
+    """
     # Generate plots
     img_tiers  = plot_tiers(scored_df)
     img_ic50   = plot_ic50(scored_df)
@@ -450,10 +540,12 @@ def generate_report(scored_df: pd.DataFrame, out_dir: Path):
            ".note{background:#fffbe6;border-left:3px solid #f0c040;padding:10px 14px;margin:12px 0;font-size:13px;color:#555}")
 
     def card(label, val, color=""):
+        """Return an HTML summary-card <div> with a label, value and optional color."""
         return (f'<div class="card"><div class="cl">{label}</div>'
                 f'<div class="cv"{"" if not color else f" style=color:{color}"}>{val}</div></div>')
 
     def tbl(df, cols, empty="No candidates."):
+        """Render a DataFrame as an HTML table over ``cols``, or an italic empty-state message."""
         if df.empty:
             return f"<p style='color:#888;font-style:italic;'>{empty}</p>"
         th = ''.join(f'<th>{c}</th>' for c in cols)
@@ -462,6 +554,7 @@ def generate_report(scored_df: pd.DataFrame, out_dir: Path):
         return f"<table><thead><tr>{th}</tr></thead><tbody>{tr}</tbody></table>"
 
     def hla_tbl():
+        """Render the per-HLA-allele Tier 1/2 breakdown as an HTML table (or empty-state message)."""
         if hla_df.empty:
             return "<p style='color:#888;font-style:italic;'>No Tier 1 or Tier 2 candidates.</p>"
         th = ''.join(f'<th>{c}</th>' for c in ['HLA Allele','Candidates','Tier 1','Best IC50 (nM)','Median IC50 (nM)'])
@@ -471,6 +564,7 @@ def generate_report(scored_df: pd.DataFrame, out_dir: Path):
         return f"<table><thead><tr>{th}</tr></thead><tbody>{tr}</tbody></table>"
 
     def conf_cards():
+        """Render the four ensemble-confidence-score (3..0) summary cards as an HTML row."""
         return ('<div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:16px;">' +
                 ''.join(f'<div class="card"><div class="cl">Score {s}</div>'
                         f'<div class="cv">{(scored_df.nmd_confidence_score==s).sum()}</div></div>'
@@ -576,6 +670,17 @@ Missense variants (NOT_APPLICABLE) are not subject to NMD but remain immunogenic
 # ═════════════════════════════════════════════════════════════════════════════
 
 def main():
+    """CLI entry point for Stage 3 per-sample NMD scoring.
+
+    Parses --pvacseq_tsv, --vep_vcf and --out_dir, loads the candidates (and the
+    VEP VCF if given), scores them, and writes nmd_scored_candidates.tsv plus,
+    for non-empty samples, nmd_hla_breakdown.tsv and report_nmd.html. Empty
+    samples (0 candidates) write only the scored TSV and return early, matching
+    the established baseline behavior.
+
+    Returns:
+        None.
+    """
     parser = argparse.ArgumentParser(
         description=(
             "GBM Pipeline Stage 3 — per-sample NMD sensitivity scoring. "

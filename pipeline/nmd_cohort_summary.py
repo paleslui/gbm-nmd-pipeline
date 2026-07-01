@@ -220,6 +220,7 @@ def plot_variant_landscape(cohort: pd.DataFrame) -> str:
 
 
 def plot_tier_by_timepoint(fs_cohort: pd.DataFrame) -> str:
+    """Grouped bar of tier counts, primary (T) vs recurrent (M), FS only."""
     if fs_cohort.empty:
         return ""
     counts = (fs_cohort.groupby(["timepoint","priority_tier"]).size()
@@ -249,6 +250,7 @@ def plot_tier_by_timepoint(fs_cohort: pd.DataFrame) -> str:
 
 
 def plot_paired(paired: pd.DataFrame) -> str:
+    """Grouped bar of TIER1 candidate counts per patient, primary (T) vs recurrent (M)."""
     if paired.empty:
         return ""
     fig, ax = plt.subplots(figsize=(11, 4.5))
@@ -269,6 +271,7 @@ def plot_paired(paired: pd.DataFrame) -> str:
 
 
 def plot_top_genes(fs_cohort: pd.DataFrame, n: int = 20) -> str:
+    """Horizontal bar of the top ``n`` genes producing TIER1 candidates (FS only)."""
     if fs_cohort.empty:
         return ""
     tier1 = fs_cohort[fs_cohort["priority_tier"] == "TIER1"]
@@ -1448,6 +1451,29 @@ def generate_report(cohort: pd.DataFrame, fs_cohort: pd.DataFrame,
                     mod3: pd.DataFrame, mod4: pd.DataFrame, mod5: pd.DataFrame,
                     stage3_stats: pd.DataFrame, module_imgs: Dict[str, str],
                     overlap_data: Dict[str, dict]):
+    """Assemble and write the single self-contained cohort HTML report.
+
+    Renders the cohort-level static plots plus the embedded Module 3/4/5 figures,
+    the per-pair overlap widget and per-sample/per-patient drill-down widgets,
+    and writes cohort_report.html to out_dir. An empty cohort writes a stub
+    report and returns early.
+
+    Args:
+        cohort (pd.DataFrame): All candidates (every variant type).
+        fs_cohort (pd.DataFrame): NMD-actionable (frameshift) subset.
+        summary (pd.DataFrame): Cohort summary table (cohort_summary).
+        paired (pd.DataFrame): Per-patient T-vs-M FS comparison.
+        landscape (pd.DataFrame): Variant-type landscape table.
+        out_dir (Path): Directory to write cohort_report.html into.
+        n_input_samples (int): Number of input per-sample dirs (incl. empty ones).
+        mod3, mod4, mod5 (pd.DataFrame): Module 3/4/5 per-sample tables.
+        stage3_stats (pd.DataFrame): Paired Wilcoxon + BH-FDR stats for the modules.
+        module_imgs (Dict[str, str]): {key: base64 data URI} for the module plots.
+        overlap_data (Dict[str, dict]): Per-pair overlap widget data.
+
+    Returns:
+        None. Writes cohort_report.html as a side effect.
+    """
     out_dir.mkdir(parents=True, exist_ok=True)
 
     if cohort.empty:
@@ -1716,6 +1742,18 @@ high-confidence binders are the strongest therapeutic targets.</p>
 # ═════════════════════════════════════════════════════════════════════════════
 
 def main():
+    """CLI entry point for the Stage 3 NMD cohort summary.
+
+    Parses --input_dir, --out_dir and the optional Stage 1 join inputs
+    (--stage1_summary, --paired_overlap), loads every per-sample
+    nmd_scored_candidates.tsv, builds the cohort/landscape/paired tables and
+    Modules 3/4/5 with their paired statistics and plots, and writes the
+    cohort_*.tsv outputs plus cohort_report.html to --out_dir. Missing Stage 1
+    inputs degrade gracefully (NaN-filled / widgets skipped).
+
+    Returns:
+        None.
+    """
     ap = argparse.ArgumentParser(description="GBM Stage 3 — NMD cohort summary")
     ap.add_argument("--input_dir", required=True, type=Path,
                     help="Directory containing per-sample subdirs (each with nmd_scored_candidates.tsv)")

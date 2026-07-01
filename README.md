@@ -334,6 +334,8 @@ All three runs produced **bit-for-bit identical** results across all 56 samples 
 
 ## Troubleshooting
 
+> See [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) for the reproducibility failure modes (env integrity gate, python hijacking, the env-4a82 MHCnuggets patch, empty-sample `KeyError`, disk quota, `__BASE__` placeholders) and how to diagnose them.
+
 **Setup fails before any conda activation with a git/openssl error**
 This is the libk5crypto/OPENSSL_1_1_1b symbol conflict that hits system git on RHEL8 compute nodes when `LD_LIBRARY_PATH` is inherited from a conda env. `setup.sh` STEP 1c pre-populates `resources/VEP_plugins/` with `LD_LIBRARY_PATH` unset before any conda activation, so this error should not appear during pipeline runs. If you see it from a manual `git clone`, run it from a clean shell (no conda env active).
 
