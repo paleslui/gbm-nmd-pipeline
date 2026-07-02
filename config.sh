@@ -74,7 +74,10 @@ PVACSEQ_ALGORITHMS="MHCflurry MHCnuggetsI NetMHC NetMHCpan NetMHCpanEL PickPocke
 #   bedtools genomecov -bg -i target.bed | awk '{s += $3-$2} END {print s/1e6}'
 # Exported so the Stage 1 Python child (gbm_analysis.py via slurm_python.sh)
 # can read it from the environment (os.environ["TMB_DENOMINATOR_MB"]).
-export TMB_DENOMINATOR_MB=30
+# Empirical value from resources/S31285117_Padded.bed
+# (Agilent SureSelect Exome V7 + 100bp padding, MD5 46e1a67055...)
+# Sum of (end - start) across 215,154 intervals / 1e6
+export TMB_DENOMINATOR_MB=92.699206
 
 
 export NXF_HOME=$BASE/.nextflow

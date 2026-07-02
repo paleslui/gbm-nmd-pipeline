@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================================
-# GBM NMD-Neoantigen Pipeline — One-Time Setup Script
+# GBM NMD-Neoantigen Pipeline - One-Time Setup Script
 # =============================================================================
 # Run this ONCE before your first pipeline run:
 #   tmux new -s gbm-setup
@@ -26,7 +26,7 @@ mkdir -p $LOGS
 exec > >(tee -a $LOGS/setup.log) 2>&1
 
 echo "============================================================"
-echo "  GBM NMD-Neoantigen Pipeline — Setup"
+echo "  GBM NMD-Neoantigen Pipeline - Setup"
 echo "  $(date)"
 echo "  Base: ${BASE}"
 echo "============================================================"
@@ -137,7 +137,7 @@ else
     #    Stage 1 (gbm_analysis.py) does `from scipy.stats import spearmanr,
     #    wilcoxon` and `import numpy as np`; Stage 3 (nmd_scoring.py,
     #    nmd_cohort_summary.py) also use numpy. Previously scipy came in only
-    #    transitively via seaborn and numpy via pandas — if that transitive
+    #    transitively via seaborn and numpy via pandas - if that transitive
     #    edge ever drops, Stage 1 dies with "No module named 'scipy'".
     #    Full direct-import set of the Python stages: cyvcf2, scipy, numpy,
     #    pandas, matplotlib, seaborn. Do NOT remove scipy/numpy.
@@ -153,7 +153,7 @@ NF_BIN=$NF_ENV_PATH/bin/nextflow
 echo ""
 echo "[STEP 3b] Indexing reference genome for TMZ signature analysis..."
 if [ ! -f "$FASTA" ]; then
-    echo "[WARN]  FASTA not found — skipping indexing (TMZ signature unavailable)"
+    echo "[WARN]  FASTA not found - skipping indexing (TMZ signature unavailable)"
 elif [ -f "${FASTA}.fai" ]; then
     echo "[OK] Reference index already exists"
 else
@@ -219,7 +219,7 @@ fi
 # process (env-4a82), independent of PATH. This patch is LOST on every clean
 # rebuild of env-4a82, so setup.sh MUST re-apply it every time.
 #
-# NOTE: the previous idempotency guard `grep -q "sys.executable"` was BROKEN —
+# NOTE: the previous idempotency guard `grep -q "sys.executable"` was BROKEN -
 # prediction_class.py already contains an unrelated sys.executable at line ~78
 # (the IEDB standalone call), so the guard always matched and the real line-156
 # MHCnuggets patch was NEVER applied. We now key off the bad pattern itself.
@@ -239,7 +239,7 @@ while IFS= read -r PRED_CLASS; do
     elif grep -q 'arguments = \[sys.executable, script,' "$PRED_CLASS"; then
         echo "[OK] already patched: $PRED_CLASS"
     else
-        echo "[WARN] MHCnuggets invocation pattern not found in $PRED_CLASS — pvactools layout may have changed; verify manually" >&2
+        echo "[WARN] MHCnuggets invocation pattern not found in $PRED_CLASS - pvactools layout may have changed; verify manually" >&2
     fi
 done < <(find "$PVACSEQ_ENV"/lib/python*/site-packages/pvactools -name prediction_class.py -path '*pvactools/lib*' 2>/dev/null)
 echo "[OK] pvactools sys.executable patch applied to $PATCH_COUNT file(s)"
@@ -259,7 +259,7 @@ fi
 # Bio/pandas/requests) but are only pulled in TRANSITIVELY by the pvactools pip
 # install. We deliberately do NOT add them to environment.yml, because Nextflow
 # derives the env directory name (env-4a82...) from an md5/murmur hash of the
-# YAML content — editing the YAML would change the hash, so Nextflow would
+# YAML content - editing the YAML would change the hash, so Nextflow would
 # rebuild a NEW, unpatched env at runtime and this whole fix would be bypassed.
 # Instead we pin them here via pip (idempotent: already-satisfied is a no-op),
 # which keeps the env hash stable while guaranteeing the packages are present.
@@ -277,7 +277,7 @@ if [ -d "$MHCFLURRY_DIR/4" ]; then
     echo "[OK] MHCflurry models already present"
 else
     mkdir -p $MHCFLURRY_DIR
-    # mhcflurry ignores MHCFLURRY_DATA_PATH during download — fetch to default then copy
+    # mhcflurry ignores MHCFLURRY_DATA_PATH during download - fetch to default then copy
     $PVACSEQ_ENV/bin/mhcflurry-downloads fetch models_class1_pan
     DEFAULT_MHCFLURRY=$(python3 -c "import appdirs; print(appdirs.user_data_dir('mhcflurry'))" 2>/dev/null || echo "$HOME/.local/share/mhcflurry")
     cp -r $DEFAULT_MHCFLURRY/4 $MHCFLURRY_DIR/
@@ -348,7 +348,7 @@ fi
 echo ""
 echo "[STEP 8] Updating pipeline scripts..."
 
-# Set conda cacheDir in slurm.config — always overwrite to ensure correct user path
+# Set conda cacheDir in slurm.config - always overwrite to ensure correct user path
 SLURM_CFG=$NF_PIPELINE/slurm.config
 sed -i '/conda.cacheDir/d' $SLURM_CFG
 sed -i "1s|^|conda.cacheDir = \"$NEXTFLOW_WORK/conda\"\n\n|" $SLURM_CFG
@@ -421,7 +421,7 @@ echo "[STEP 10] Environment integrity check..."
 
 INTEGRITY_FAIL=0
 
-# 10a: pVACseq env (env-4a82) — used by Nextflow pvacseq/configure_pvacseq tasks
+# 10a: pVACseq env (env-4a82) - used by Nextflow pvacseq/configure_pvacseq tasks
 echo "[INFO] Checking pVACseq env: $PVACSEQ_ENV"
 "$PVACSEQ_ENV/bin/python" - <<'PYEOF' || INTEGRITY_FAIL=1
 import importlib, sys
@@ -449,12 +449,12 @@ else
     INTEGRITY_FAIL=1
 fi
 
-# 10c: functional check — the child interpreter used by MHCnuggets must import Bio
+# 10c: functional check - the child interpreter used by MHCnuggets must import Bio
 "$PVACSEQ_ENV/bin/python" -c "import sys, subprocess; subprocess.run([sys.executable, '-c', 'import Bio'], check=True)" 2>/dev/null \
     && echo "[OK] MHCnuggets child interpreter (sys.executable) imports Bio" \
     || { echo "[ERROR] MHCnuggets child interpreter cannot import Bio" >&2; INTEGRITY_FAIL=1; }
 
-# 10d: nf_pvacseq env — used by Stage 1 (gbm_analysis) and Stage 3 (nmd_*)
+# 10d: nf_pvacseq env - used by Stage 1 (gbm_analysis) and Stage 3 (nmd_*)
 echo "[INFO] Checking nf_pvacseq env: $NF_ENV_PATH"
 "$NF_ENV_PATH/bin/python" - <<'PYEOF' || INTEGRITY_FAIL=1
 import importlib, sys
@@ -473,7 +473,7 @@ PYEOF
 
 if [ "$INTEGRITY_FAIL" -ne 0 ]; then
     echo ""
-    echo "[FATAL] Environment integrity check FAILED — see [ERROR] lines above." >&2
+    echo "[FATAL] Environment integrity check FAILED - see [ERROR] lines above." >&2
     echo "        The pipeline WILL fail at runtime; refusing to report success." >&2
     exit 1
 fi

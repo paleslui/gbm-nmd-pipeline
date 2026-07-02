@@ -1,6 +1,6 @@
 # GBM NMD-Neoantigen Pipeline
 
-A computational pipeline for identifying NMD-sensitive immunogenic mutations in primary and recurrent Glioblastoma (GBM). Developed as part of a Master's thesis at ZHAW. While the focus is GBM NMD/neoantigen biology, the paired primary/recurrent design and the five analytical modules generalise to any paired-cohort study — any two matched timepoints or conditions with per-patient VCFs.
+A computational pipeline for identifying NMD-sensitive immunogenic mutations in primary and recurrent Glioblastoma (GBM). Developed as part of a Master's thesis at ZHAW. While the focus is GBM NMD/neoantigen biology, the paired primary/recurrent design and the five analytical modules generalise to any paired-cohort study - any two matched timepoints or conditions with per-patient VCFs.
 
 **Thesis:** Identifying NMD-Sensitive Immunogenic Mutations in Primary and Recurrent Glioblastoma  
 **Author:** Luigi Palese  
@@ -10,7 +10,7 @@ A computational pipeline for identifying NMD-sensitive immunogenic mutations in 
 
 ## Background
 
-Temozolomide (TMZ) chemotherapy induces frameshift mutations in GBM tumor cells that introduce premature termination codons (PTCs). Nonsense-mediated mRNA decay (NMD) degrades these transcripts before they can be translated and presented to the immune system. This pipeline identifies which TMZ-induced mutations produce immunogenic neoantigens that are being silenced by NMD — candidates that could become visible to the immune system upon NMD inhibition.
+Temozolomide (TMZ) chemotherapy induces frameshift mutations in GBM tumor cells that introduce premature termination codons (PTCs). Nonsense-mediated mRNA decay (NMD) degrades these transcripts before they can be translated and presented to the immune system. This pipeline identifies which TMZ-induced mutations produce immunogenic neoantigens that are being silenced by NMD - candidates that could become visible to the immune system upon NMD inhibition.
 
 ---
 
@@ -35,10 +35,10 @@ The three stages implement five analytical modules. Modules 1–2 run in Stage 1
 | # | Module | What it tests | Per-sample TSV | Headline plot |
 |---|--------|---------------|----------------|---------------|
 | **1** | Mutation burden analysis (Stage 1) | Whether tumour mutation burden (TMB) shifts between primary (T) and recurrent (M) timepoints across paired patients. | `1_gbm_analysis/sample_mutation_summary.tsv` | `plot_paired_tmb.png` |
-| **2** | Truncating mutation enrichment (Stage 1) | Whether the fraction of truncating variants (frameshift / stop-gained / splice / start-lost) is enriched at recurrence — the PTC-generating events NMD acts on. | `1_gbm_analysis/sample_mutation_summary.tsv` | `plot_paired_truncating_fraction.png` |
+| **2** | Truncating mutation enrichment (Stage 1) | Whether the fraction of truncating variants (frameshift / stop-gained / splice / start-lost) is enriched at recurrence - the PTC-generating events NMD acts on. | `1_gbm_analysis/sample_mutation_summary.tsv` | `plot_paired_truncating_fraction.png` |
 | **3** | NMD-sensitive mutation analysis (Stage 3) | Whether the count of NMD-sensitive truncating variants (VEP NMD plugin + Lindeboom ensemble) changes between T and M. | `3_nmd_analysis/cohort/per_sample_nmd_summary.tsv` | `m3_nmd_sensitive_paired.png` |
 | **4** | Neoepitope burden analysis (Stage 3) | Whether the per-sample neoepitope (neoantigen) burden from pVACseq differs between timepoints. | `3_nmd_analysis/cohort/per_sample_neoepitope_summary.tsv` | `m4_neoepitope_burden_paired.png` |
-| **5** | Neoepitopes stratified by NMD status (Stage 3) | Whether neoepitopes arising from NMD-sensitive vs NMD-insensitive transcripts diverge between T and M — the core thesis hypothesis (epitopes silenced by NMD). | `3_nmd_analysis/cohort/per_sample_neoepitope_nmd_summary.tsv` | `m5_neoepitope_by_nmd_paired.png` |
+| **5** | Neoepitopes stratified by NMD status (Stage 3) | Whether neoepitopes arising from NMD-sensitive vs NMD-insensitive transcripts diverge between T and M - the core thesis hypothesis (epitopes silenced by NMD). | `3_nmd_analysis/cohort/per_sample_neoepitope_nmd_summary.tsv` | `m5_neoepitope_by_nmd_paired.png` |
 
 ---
 
@@ -101,7 +101,7 @@ Monitor:
 tail -f logs/Slurm-<job_id>.out
 ```
 
-You only need to run this once per fresh clone. Setup is idempotent — re-running it on a partial install fixes anything missing without redoing existing steps.
+You only need to run this once per fresh clone. Setup is idempotent - re-running it on a partial install fixes anything missing without redoing existing steps.
 
 ### 5. Run the pipeline
 
@@ -215,10 +215,10 @@ results/run_<TS>/1_gbm_analysis/sample_mutation_summary.tsv          # per-sampl
 results/run_<TS>/1_gbm_analysis/paired_variant_overlap.tsv           # T/M shared-vs-private counts
 results/run_<TS>/1_gbm_analysis/paired_stats.tsv                     # Module 1+2 paired Wilcoxon + BH-FDR
 results/run_<TS>/1_gbm_analysis/all_truncating_variants.tsv          # every truncating variant (FS/SG/splice/start-lost)
-results/run_<TS>/3_nmd_analysis/cohort/per_sample_nmd_summary.tsv             # NEW — Module 3
-results/run_<TS>/3_nmd_analysis/cohort/per_sample_neoepitope_summary.tsv      # NEW — Module 4
-results/run_<TS>/3_nmd_analysis/cohort/per_sample_neoepitope_nmd_summary.tsv  # NEW — Module 5
-results/run_<TS>/3_nmd_analysis/cohort/paired_stats_stage3.tsv                # NEW — Module 3/4/5 Wilcoxon
+results/run_<TS>/3_nmd_analysis/cohort/per_sample_nmd_summary.tsv             # NEW - Module 3
+results/run_<TS>/3_nmd_analysis/cohort/per_sample_neoepitope_summary.tsv      # NEW - Module 4
+results/run_<TS>/3_nmd_analysis/cohort/per_sample_neoepitope_nmd_summary.tsv  # NEW - Module 5
+results/run_<TS>/3_nmd_analysis/cohort/paired_stats_stage3.tsv                # NEW - Module 3/4/5 Wilcoxon
 ```
 
 The temozolomide (SBS11) mutational signature is reported as the `sbs11_count` / `sbs11_pct` columns of `sample_mutation_summary.tsv` (SBS11 = C>T at CpC, the COSMIC temozolomide signature).
@@ -227,7 +227,7 @@ The temozolomide (SBS11) mutational signature is reported as the `sbs11_count` /
 
 - **Paired test.** Every primary-vs-recurrent comparison uses the Wilcoxon signed-rank test (`scipy.stats.wilcoxon`) over patients with both timepoints.
 - **Multiple-testing correction.** Benjamini–Hochberg FDR is applied *within each module family*: Modules 1+2 form one family in Stage 1 (`paired_stats.tsv`), and Modules 3+4+5 form one family in Stage 3 (`paired_stats_stage3.tsv`).
-- **Usable pairs.** Reported `n_pairs` reflects only usable pairs — patients missing a timepoint, or with an undefined denominator for a given metric, are dropped from that test.
+- **Usable pairs.** Reported `n_pairs` reflects only usable pairs - patients missing a timepoint, or with an undefined denominator for a given metric, are dropped from that test.
 - **Effect sizes.** Each test reports `median_delta` and `mean_delta` (recurrent − primary) alongside the raw and BH-adjusted p-values, so direction and magnitude are visible independent of significance.
 
 ### TMB normalisation
@@ -255,7 +255,7 @@ Before pVACseq runs, raw VCFs are filtered to keep only variants whose VEP/SnpEf
 
 Implemented in `pipeline/scripts/filter_nmd_relevant.sh` and integrated into `pipeline/slurm/slurm_pvacseq_filtered.sh`. The filter typically reduces variant counts ~28× (e.g. a sample with 1660 raw variants → 32 NMD-relevant variants), which dramatically speeds up Stage 2 (pVACseq runtime is dominated by IEDB binding-prediction calls).
 
-The filter is idempotent — already-filtered VCFs in `data/vcf_filtered/` are skipped on re-runs.
+The filter is idempotent - already-filtered VCFs in `data/vcf_filtered/` are skipped on re-runs.
 
 ---
 
@@ -263,8 +263,8 @@ The filter is idempotent — already-filtered VCFs in `data/vcf_filtered/` are s
 
 Each neoantigen candidate from pVACseq is classified by NMD sensitivity using an **ensemble of two methods**:
 
-1. **VEP NMD plugin** (Ensembl) — reads the `NMD` field from the VEP CSQ annotation. An empty NMD field on a truncating variant means NMD is triggered (SENSITIVE). `NMD_escaping_variant` = INSENSITIVE.
-2. **Lindeboom rules** ([Lindeboom et al. 2019, *Nat Genet*](https://www.nature.com/articles/s41588-019-0517-5)) — applied in priority order:
+1. **VEP NMD plugin** (Ensembl) - reads the `NMD` field from the VEP CSQ annotation. An empty NMD field on a truncating variant means NMD is triggered (SENSITIVE). `NMD_escaping_variant` = INSENSITIVE.
+2. **Lindeboom rules** ([Lindeboom et al. 2019, *Nat Genet*](https://www.nature.com/articles/s41588-019-0517-5)) - applied in priority order:
 
 | Rule | Condition | Classification |
 |------|-----------|----------------|
@@ -279,9 +279,9 @@ Each neoantigen candidate from pVACseq is classified by NMD sensitivity using an
 
 | Tier | Criteria | Interpretation |
 |------|----------|----------------|
-| **TIER1** | NMD-SENSITIVE + IC50 < 50 nM | Primary therapeutic targets — silenced by NMD, exposed by NMD inhibition |
+| **TIER1** | NMD-SENSITIVE + IC50 < 50 nM | Primary therapeutic targets - silenced by NMD, exposed by NMD inhibition |
 | **TIER2** | NMD-SENSITIVE + IC50 50–500 nM | Moderate binders, potentially relevant after NMD inhibition |
-| **TIER3** | NMD-INSENSITIVE + IC50 < 500 nM | Already expressed — controls for immune response without NMD inhibition |
+| **TIER3** | NMD-INSENSITIVE + IC50 < 500 nM | Already expressed - controls for immune response without NMD inhibition |
 | Unclassified | Missense variants or insufficient transcript info | NMD does not apply |
 
 The cohort report breaks these out by timepoint (primary vs recurrent) and per patient, which is the key analysis for the thesis hypothesis.
@@ -328,7 +328,7 @@ The pipeline has been validated by three escalating destructive reproducibility 
 
 All three runs produced **bit-for-bit identical** results across all 56 samples (338 total epitopes), with identical gold-standard hits in 11_T (ITGA4 frameshift YCIKLIHIV at HLA-C*12:03, BRAT1 frameshift STMSFCGTL at HLA-C*12:03).
 
-**Integrity gate.** The reproducibility guarantee is enforced, not assumed. `setup.sh` STEP 10 is a hard gate: after building the conda environments it imports every critical package (scipy, Bio, pandas, pvactools, …) and verifies the pVACtools `sys.executable` patch, exiting non-zero and naming the offending package if anything is missing. This closes the failure mode behind the earlier `20260630` production run, where a silent environment breakage (`No module named 'scipy'` in Stage 1; `No module named 'Bio'` in Stage 2) was reported as a successful setup. With this gate in place a fresh `git clone` → `setup.sh` → `master_pipeline.sh` reliably reproduces the byte-equivalent baseline, and a corrupted environment fails loudly at setup time rather than silently mid-run.
+**Integrity gate.** The reproducibility guarantee is enforced, not assumed. `setup.sh` STEP 10 is a hard gate: after building the conda environments it imports every critical package (scipy, Bio, pandas, pvactools, ...) and verifies the pVACtools `sys.executable` patch, exiting non-zero and naming the offending package if anything is missing. This closes the failure mode behind the earlier `20260630` production run, where a silent environment breakage (`No module named 'scipy'` in Stage 1; `No module named 'Bio'` in Stage 2) was reported as a successful setup. With this gate in place a fresh `git clone` → `setup.sh` → `master_pipeline.sh` reliably reproduces the byte-equivalent baseline, and a corrupted environment fails loudly at setup time rather than silently mid-run.
 
 ---
 
@@ -340,16 +340,16 @@ All three runs produced **bit-for-bit identical** results across all 56 samples 
 This is the libk5crypto/OPENSSL_1_1_1b symbol conflict that hits system git on RHEL8 compute nodes when `LD_LIBRARY_PATH` is inherited from a conda env. `setup.sh` STEP 1c pre-populates `resources/VEP_plugins/` with `LD_LIBRARY_PATH` unset before any conda activation, so this error should not appear during pipeline runs. If you see it from a manual `git clone`, run it from a clean shell (no conda env active).
 
 **Stage 2 fails with `Failed to create Conda environment`**
-Nextflow couldn't find or build envs in `nextflow_work/conda/`. Most often caused by deleting `nextflow_work/` between runs or a partial setup. Re-run `sbatch pipeline/slurm/slurm_setup.sh` — it is idempotent and rebuilds anything missing.
+Nextflow couldn't find or build envs in `nextflow_work/conda/`. Most often caused by deleting `nextflow_work/` between runs or a partial setup. Re-run `sbatch pipeline/slurm/slurm_setup.sh` - it is idempotent and rebuilds anything missing.
 
 **Stage 3 fails with `EOFError: Compressed file ended before the end-of-stream marker`**
 A stale, truncated VEP VCF from a previously killed run was picked up. Delete the offending work dir under `nextflow_work/` and re-run.
 
 **A sample produces 0 NMD candidates**
-This usually means pVACseq's coverage filter (`--tdna-vaf 0.25` by default) rejected all of the sample's variants — common in low-tumor-purity samples. The variants exist in `2_pvacseq/pvactools/<sample>/MHC_Class_I/<sample>.all_epitopes.tsv` but none pass the strict default. To recover them, lower `--tdna-vaf` (e.g. to 0.10). The 8-algorithm binding consensus (median IC50 < 500 nM) protects against false positives, so a relaxed VAF still produces high-confidence neoantigens.
+This usually means pVACseq's coverage filter (`--tdna-vaf 0.25` by default) rejected all of the sample's variants - common in low-tumor-purity samples. The variants exist in `2_pvacseq/pvactools/<sample>/MHC_Class_I/<sample>.all_epitopes.tsv` but none pass the strict default. To recover them, lower `--tdna-vaf` (e.g. to 0.10). The 8-algorithm binding consensus (median IC50 < 500 nM) protects against false positives, so a relaxed VAF still produces high-confidence neoantigens.
 
 **`module load lsfm-init-miniconda/1.0.0` fails on your cluster**
-That module is ZHAW-specific. `setup.sh` installs its own miniforge into `$BASE/miniforge3/` and uses that throughout — the `module load` lines in the slurm scripts only initialise the cluster's base conda before activating the project's own env. If your cluster uses different module paths, edit the `module load` lines in `pipeline/slurm/*.sh`.
+That module is ZHAW-specific. `setup.sh` installs its own miniforge into `$BASE/miniforge3/` and uses that throughout - the `module load` lines in the slurm scripts only initialise the cluster's base conda before activating the project's own env. If your cluster uses different module paths, edit the `module load` lines in `pipeline/slurm/*.sh`.
 
 **Inode quota exceeded (BeeGFS / Lustre)**
 Conda envs are inode-heavy (~200 k for the four envs combined). Check usage with `du --inodes -s ./*` and clear unused conda envs elsewhere if needed.
@@ -363,16 +363,16 @@ This pipeline runs MHC Class I only. Class II HLA allele formats (HLA-DPA1, DPB1
 
 If you use this pipeline, please cite:
 
-- **pVACtools**: Hundal et al. (2020) *Cancer Immunology Research* — pVACtools: A Computational Toolkit to Identify and Visualize Cancer Neoantigens
-- **VEP**: McLaren et al. (2016) *Genome Biology* — The Ensembl Variant Effect Predictor
-- **VEP NMD plugin**: Coelho et al. (2020) *NAR Genomics & Bioinformatics* — Nonsense-mediated mRNA decay prediction in the Ensembl Variant Effect Predictor
-- **NMD rules**: Lindeboom et al. (2019) *Nature Genetics* — The rules and impact of nonsense-mediated mRNA decay in human cancers
-- **Mutational signatures (SBS11)**: Alexandrov et al. (2020) *Nature* — The repertoire of mutational signatures in human cancer (COSMIC SBS11 = temozolomide exposure)
-- **Paired statistics**: Virtanen et al. (2020) *Nature Methods* — SciPy 1.0 (`scipy.stats.wilcoxon`, Wilcoxon signed-rank test for all paired primary-vs-recurrent comparisons)
-- **Multiple-testing correction**: Benjamini & Hochberg (1995) *J. R. Stat. Soc. B* — Controlling the false discovery rate (BH-FDR applied within each module family)
+- **pVACtools**: Hundal et al. (2020) *Cancer Immunology Research* - pVACtools: A Computational Toolkit to Identify and Visualize Cancer Neoantigens
+- **VEP**: McLaren et al. (2016) *Genome Biology* - The Ensembl Variant Effect Predictor
+- **VEP NMD plugin**: Coelho et al. (2020) *NAR Genomics & Bioinformatics* - Nonsense-mediated mRNA decay prediction in the Ensembl Variant Effect Predictor
+- **NMD rules**: Lindeboom et al. (2019) *Nature Genetics* - The rules and impact of nonsense-mediated mRNA decay in human cancers
+- **Mutational signatures (SBS11)**: Alexandrov et al. (2020) *Nature* - The repertoire of mutational signatures in human cancer (COSMIC SBS11 = temozolomide exposure)
+- **Paired statistics**: Virtanen et al. (2020) *Nature Methods* - SciPy 1.0 (`scipy.stats.wilcoxon`, Wilcoxon signed-rank test for all paired primary-vs-recurrent comparisons)
+- **Multiple-testing correction**: Benjamini & Hochberg (1995) *J. R. Stat. Soc. B* - Controlling the false discovery rate (BH-FDR applied within each module family)
 
 ---
 
 ## License
 
-MIT License — see LICENSE file.
+MIT License - see LICENSE file.

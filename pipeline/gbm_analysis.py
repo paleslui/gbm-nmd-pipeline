@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-gbm_analysis.py — Stage 1 of the GBM NMD-Neoantigen Pipeline.
+gbm_analysis.py - Stage 1 of the GBM NMD-Neoantigen Pipeline.
 
 Builds per-sample somatic mutation summaries for 28 paired primary/recurrent
 glioblastoma samples (56 SnpEff-annotated VCFs) and the paired statistics that
@@ -68,12 +68,12 @@ from scipy.stats import spearmanr, wilcoxon
 
 # ── PALETTE ──────────────────────────────────────────────────────────────────
 COLORS: Dict[str, str] = {
-    "primary": "#377AB8",      # blue   — primary (T)
-    "recurrent": "#D85A30",    # orange — recurrent (M)
-    "shared": "#888888",       # grey   — shared variants
-    "truncating": "#C0392B",   # red    — truncating
-    "missense": "#F39C12",     # amber  — missense
-    "synonymous": "#95A5A6",   # grey   — synonymous
+    "primary": "#377AB8",      # blue   - primary (T)
+    "recurrent": "#D85A30",    # orange - recurrent (M)
+    "shared": "#888888",       # grey   - shared variants
+    "truncating": "#C0392B",   # red    - truncating
+    "missense": "#F39C12",     # amber  - missense
+    "synonymous": "#95A5A6",   # grey   - synonymous
 }
 
 # ── VCF FILENAME PARSING ─────────────────────────────────────────────────────
@@ -233,7 +233,7 @@ def parse_sample(vcf_path: Path, sample: str, patient: str, timepoint: str,
              ``timepoint`` ("primary"/"recurrent") labels; ``fasta`` an open
              FastaReader for SBS11 context (or None to skip SBS11); ``tmb_denom``
              callable megabases for TMB normalisation.
-    Outputs: ``(row, truncating_df, pass_keys)`` — the summary dict with all
+    Outputs: ``(row, truncating_df, pass_keys)`` - the summary dict with all
              columns of sample_mutation_summary.tsv, a DataFrame of truncating
              variants for all_truncating_variants.tsv, and the set of PASS
              variant identity keys ("chrom:pos:ref>alt") for overlap analysis.
@@ -326,7 +326,7 @@ def build_summary(input_dir: Path, fasta: Optional[FastaReader], tmb_denom: floa
 
     Inputs:  ``input_dir`` directory of *-ensemble-annotated.vcf files; an open
              ``fasta`` (or None); ``tmb_denom`` callable megabases.
-    Outputs: ``(summary_df, truncating_df, keys_by_sample)`` — the per-sample
+    Outputs: ``(summary_df, truncating_df, keys_by_sample)`` - the per-sample
              summary table (columns in spec order), the concatenated truncating
              variant table, and a {sample: set(variant keys)} map for overlap.
     Side effects: prints per-sample progress; exits if no VCFs are found.
@@ -675,7 +675,7 @@ def make_overlap_plot(overlap: pd.DataFrame, out_path: Path) -> None:
     ax.set_xticklabels(patients, fontsize=9)
     ax.set_xlabel("Patient")
     ax.set_ylabel("PASS variant count")
-    ax.set_title("Variant overlap — private vs shared per patient")
+    ax.set_title("Variant overlap - private vs shared per patient")
     ax.legend()
     _style_axes(ax)
     _save(fig, out_path)
@@ -809,7 +809,7 @@ def _table(df: pd.DataFrame, float_cols_1dp: Optional[Set[str]] = None) -> str:
     def fmt(col: str, v: object) -> str:
         if isinstance(v, float):
             if np.isnan(v):
-                return "—"
+                return "-"
             if col in float_cols_1dp:
                 return f"{v:.1f}"
             return f"{v:.4g}" if v != int(v) else f"{int(v)}"
@@ -848,28 +848,28 @@ def build_report(out_dir: Path, summary: pd.DataFrame, overlap: pd.DataFrame,
 
     sections: List[str] = []
 
-    # Section 1 — cohort overview
+    # Section 1 - cohort overview
     sections.append(
         "<h2>1. Cohort overview</h2>"
         + cards(("Samples", n_samples), ("Patients", n_patients),
                 ("Paired patients", n_pairs), ("Primary (T)", n_primary),
                 ("Recurrent (M)", n_recurrent)))
 
-    # Section 2 — per-sample summary table
+    # Section 2 - per-sample summary table
     sections.append(
         "<h2>2. Per-sample mutation summary</h2>"
         "<p>Full per-sample table (scrollable). TMB normalised to "
         f"{tmb_denom:g} Mb.</p>"
         + _table(summary, pct1))
 
-    # Section 3 — paired statistics
+    # Section 3 - paired statistics
     sections.append(
         "<h2>3. Paired statistics</h2>"
         "<p>Paired Wilcoxon signed-rank tests across timepoints; "
         "p-values BH-FDR corrected across the rows of this table.</p>"
         + _table(stats, {"truncating_fraction"}))
 
-    # Section 4 — mutation burden
+    # Section 4 - mutation burden
     sections.append(
         "<h2>4. Mutation burden</h2>"
         + _fig(out_dir, "plot_paired_tmb.png",
@@ -879,14 +879,14 @@ def build_report(out_dir: Path, summary: pd.DataFrame, overlap: pd.DataFrame,
         + _fig(out_dir, "plot_mutation_class_stacked.png",
                "Fig 3. Mutation-class composition per sample."))
 
-    # Section 5 — variant overlap
+    # Section 5 - variant overlap
     sections.append(
         "<h2>5. Variant overlap</h2>"
         + _fig(out_dir, "plot_variant_overlap_summary.png",
                "Fig 4. Private vs shared variants per paired patient.")
         + _table(overlap, pct1))
 
-    # Section 6 — truncating enrichment
+    # Section 6 - truncating enrichment
     sections.append(
         "<h2>6. Truncating mutation enrichment</h2>"
         + _fig(out_dir, "plot_paired_truncating_fraction.png",
@@ -896,7 +896,7 @@ def build_report(out_dir: Path, summary: pd.DataFrame, overlap: pd.DataFrame,
         + _fig(out_dir, "plot_tmb_vs_truncating_fraction.png",
                "Fig 7. TMB (log) vs truncating fraction, all 56 samples."))
 
-    # Section 7 — TMZ signature
+    # Section 7 - TMZ signature
     sbs = summary[["sample", "timepoint", "sbs11_count", "sbs11_pct"]].copy()
     med_p = summary[summary.timepoint == "primary"]["sbs11_pct"].median()
     med_r = summary[summary.timepoint == "recurrent"]["sbs11_pct"].median()
@@ -912,7 +912,7 @@ def build_report(out_dir: Path, summary: pd.DataFrame, overlap: pd.DataFrame,
     hla_line = (f"{len(hla_df)} sample(s) HLA-typed" if hla_df is not None
                 else "HLA typing not provided")
     header = (
-        '<header><h1>GBM NMD-Neoantigen Pipeline — Stage 1</h1>'
+        '<header><h1>GBM NMD-Neoantigen Pipeline - Stage 1</h1>'
         f'<p>Somatic mutation landscape · run {run_ts}</p>'
         f'<p>{n_samples} samples · {n_patients} patients · {n_pairs} paired · {hla_line}</p>'
         f'<div class="note">TMB normalised to a default <strong>{tmb_denom:g} Mb</strong> '
@@ -923,7 +923,7 @@ def build_report(out_dir: Path, summary: pd.DataFrame, overlap: pd.DataFrame,
 
     html = (f'<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">'
             f'<meta name="viewport" content="width=device-width, initial-scale=1">'
-            f'<title>GBM Stage 1 — {run_ts}</title><style>{_CSS}</style></head>'
+            f'<title>GBM Stage 1 - {run_ts}</title><style>{_CSS}</style></head>'
             f'<body><div class="wrap">{header}{"".join(sections)}</div></body></html>')
 
     out = out_dir / "stage1_report.html"
@@ -955,7 +955,7 @@ def remove_deprecated(out_dir: Path) -> None:
 def main() -> None:
     """CLI entry point: parse VCFs, build tables/plots/report into --out_dir."""
     parser = argparse.ArgumentParser(
-        description="GBM NMD-Neoantigen Pipeline — Stage 1 (mutation landscape)")
+        description="GBM NMD-Neoantigen Pipeline - Stage 1 (mutation landscape)")
     parser.add_argument("--input_dir", "--vcf_dir", dest="input_dir", required=True,
                         help="Directory of *-ensemble-annotated.vcf files")
     parser.add_argument("--out_dir", default="./gbm_output", help="Output directory")
@@ -978,7 +978,7 @@ def main() -> None:
                    if part.startswith("run_")), datetime.now().strftime("%Y%m%d_%H%M%S"))
 
     print("=" * 64)
-    print("  GBM NMD-Neoantigen Pipeline — Stage 1")
+    print("  GBM NMD-Neoantigen Pipeline - Stage 1")
     print(f"  input  : {input_dir}")
     print(f"  output : {out_dir}")
     print(f"  TMB denominator: {tmb_denom:g} Mb")
@@ -1019,7 +1019,7 @@ def main() -> None:
         try:
             hla_df = load_hla_typing(Path(args.hla))
             hla_df.to_csv(out_dir / "hla_typing_summary.tsv", sep="\t", index=False)
-        except Exception as exc:                       # noqa: BLE001 — non-fatal
+        except Exception as exc:                       # noqa: BLE001 - non-fatal
             print(f"  [WARN] HLA loading failed: {exc}")
 
     build_report(out_dir, summary, overlap, stats, hla_df, run_ts, tmb_denom)

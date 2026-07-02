@@ -1,0 +1,48 @@
+{
+    "input": "/cfs/earth/scratch/paleslui/gbm_nmd_pipeline/data/vcf_filtered_decompressed",
+    "hla_csv": "/cfs/earth/scratch/paleslui/gbm_nmd_pipeline/data/hla_typing_classI.csv",
+    "fasta": "/cfs/earth/scratch/paleslui/gbm_nmd_pipeline/data/reference/GRCh38.primary_assembly.fa",
+    "vep_cache": "/cfs/earth/scratch/paleslui/gbm_nmd_pipeline/resources/vep_cache",
+    "vep_cache_version": 113,
+    "vep_genome": "",
+    "vep_species": "homo_sapiens",
+    "vep_plugins": "/cfs/earth/scratch/paleslui/gbm_nmd_pipeline/resources/VEP_plugins",
+    "extra_vep_args": "",
+    "pvacseq_algorithm": "MHCflurry MHCnuggetsI NetMHC NetMHCpan NetMHCpanEL PickPocket SMM SMMPMBEC",
+    "pvacseq_iedb": "/cfs/earth/scratch/paleslui/gbm_nmd_pipeline/resources/iedb",
+    "blastp_path": [
+        
+    ],
+    "genes_of_interest": [
+        
+    ],
+    "peptide_fasta": [
+        
+    ],
+    "ph_proximal_variants_vcf": [
+        
+    ],
+    "extra_pvacseq_args": "",
+    "multiqc_config": null,
+    "multiqc_title": "pVACseq pipeline",
+    "multiqc_logo": null,
+    "multiqc_methods_description": null,
+    "outdir": "/cfs/earth/scratch/paleslui/gbm_nmd_pipeline/results/run_20260701_085805/2_pvacseq",
+    "publish_dir_mode": "copy",
+    "help": false,
+    "version": false,
+    "config_profile_name": null,
+    "config_profile_description": null,
+    "custom_config_version": "master",
+    "validate_params": false,
+    "custom_config_base": "https://raw.githubusercontent.com/nf-core/configs/master",
+    "config_profile_contact": null,
+    "config_profile_url": null,
+    "max_memory": "8.GB",
+    "max_cpus": 8,
+    "max_time": "240.h",
+    "validationFailUnrecognisedParams": false,
+    "validationLenientMode": false,
+    "validationShowHiddenParams": false,
+    "monochrome_logs": false
+}

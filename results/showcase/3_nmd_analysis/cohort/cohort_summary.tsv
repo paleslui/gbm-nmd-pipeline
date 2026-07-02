@@ -1,0 +1,25 @@
+Metric	Count
+─── Input ───	
+Samples loaded	49
+Samples with 0 candidates	7
+Patients represented	27
+Total candidates (all variant types)	338
+	
+─── NMD-actionable (frameshift only) ───	
+FS candidates	99
+FS samples with ≥1 candidate	37
+FS patients represented	24
+	
+NMD-SENSITIVE	62
+NMD-INSENSITIVE	26
+UNCERTAIN / UNKNOWN	11
+	
+TIER1 (NMD-sensitive, IC50<50)	43
+TIER2 (NMD-sensitive, IC50<500)	19
+TIER3 controls (NMD-insensitive)	26
+Unclassified	11
+	
+High confidence (3 — both methods agree)	88
+Medium confidence (2 — single method)	0
+Low confidence (1 — methods disagree)	4
+No data (0)	7

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-nmd_cohort_summary.py — GBM Pipeline Stage 3: NMD Cohort Summary
+nmd_cohort_summary.py - GBM Pipeline Stage 3: NMD Cohort Summary
 Part of the GBM NMD-Neoantigen Pipeline.
 https://github.com/paleslui/gbm-nmd-pipeline
 
@@ -157,9 +157,9 @@ def cohort_summary(cohort: pd.DataFrame, fs_cohort: pd.DataFrame, n_input_sample
         ("TIER3 controls (NMD-insensitive)",      int((fs_cohort["priority_tier"]=="TIER3_control").sum())),
         ("Unclassified",                          int((fs_cohort["priority_tier"]=="UNCLASSIFIED").sum())),
         ("", ""),
-        ("High confidence (3 — both methods agree)", int((fs_cohort["nmd_confidence_score"]==3).sum())),
-        ("Medium confidence (2 — single method)",    int((fs_cohort["nmd_confidence_score"]==2).sum())),
-        ("Low confidence (1 — methods disagree)",    int((fs_cohort["nmd_confidence_score"]==1).sum())),
+        ("High confidence (3 - both methods agree)", int((fs_cohort["nmd_confidence_score"]==3).sum())),
+        ("Medium confidence (2 - single method)",    int((fs_cohort["nmd_confidence_score"]==2).sum())),
+        ("Low confidence (1 - methods disagree)",    int((fs_cohort["nmd_confidence_score"]==1).sum())),
         ("No data (0)",                              int((fs_cohort["nmd_confidence_score"]==0).sum())),
     ]
     return pd.DataFrame(rows, columns=["Metric", "Count"])
@@ -212,7 +212,7 @@ def plot_variant_landscape(cohort: pd.DataFrame) -> str:
     ax.set_xticks(range(len(counts)))
     ax.set_xticklabels(counts.index, fontsize=11)
     ax.set_ylabel("Candidates")
-    ax.set_title(f"Variant landscape — {len(cohort)} candidates across cohort", fontsize=12)
+    ax.set_title(f"Variant landscape - {len(cohort)} candidates across cohort", fontsize=12)
     ax.set_ylim(top=max(counts.values) * 1.18)
     ax.spines[["top","right"]].set_visible(False)
     fig.tight_layout()
@@ -242,7 +242,7 @@ def plot_tier_by_timepoint(fs_cohort: pd.DataFrame) -> str:
     ax.set_xticks(list(x))
     ax.set_xticklabels(["TIER1","TIER2","TIER3 ctrl","Unclassified"], fontsize=10)
     ax.set_ylabel("Frameshift candidates")
-    ax.set_title("Tier distribution: primary (T) vs recurrent (M) — FS only", fontsize=12)
+    ax.set_title("Tier distribution: primary (T) vs recurrent (M) - FS only", fontsize=12)
     ax.legend(fontsize=9)
     ax.spines[["top","right"]].set_visible(False)
     fig.tight_layout()
@@ -290,7 +290,7 @@ def plot_top_genes(fs_cohort: pd.DataFrame, n: int = 20) -> str:
 
 
 # ═════════════════════════════════════════════════════════════════════════════
-# MAX MODULES 3/4/5 — variant-level NMD, neoepitope burden, neoepitopes-by-NMD
+# MAX MODULES 3/4/5 - variant-level NMD, neoepitope burden, neoepitopes-by-NMD
 # ═════════════════════════════════════════════════════════════════════════════
 
 # Variant identity = (chrom, pos, ref, alt, sample). NMD is a transcript-level
@@ -313,9 +313,9 @@ def augment_candidates(cohort: pd.DataFrame) -> pd.DataFrame:
     Inputs:  cohort candidate DataFrame (must have 'Best MT IC50 Score',
              'Tumor DNA VAF').
     Output:  same DataFrame with two appended columns:
-             binder_class — Strong (IC50<50 nM) / Weak (50–500) / Non-binder
+             binder_class - Strong (IC50<50 nM) / Weak (50–500) / Non-binder
                             (≥500 or null);
-             clonality    — Clonal (VAF≥0.30) / Subclonal (<0.30) / Unknown (null).
+             clonality    - Clonal (VAF≥0.30) / Subclonal (<0.30) / Unknown (null).
     Side effects: mutates and returns ``cohort``.
     """
     if cohort.empty:
@@ -378,7 +378,7 @@ def _sample_meta(cohort: pd.DataFrame) -> pd.DataFrame:
 
 def module3_nmd_summary(cohort: pd.DataFrame, variant_tbl: pd.DataFrame,
                         stage1: Optional[pd.DataFrame]) -> pd.DataFrame:
-    """Module 3 — per-sample variant-level NMD aggregation (FS / truncating).
+    """Module 3 - per-sample variant-level NMD aggregation (FS / truncating).
 
     Inputs:  cohort table, the per-variant NMD table, and the optional Stage 1
              sample_mutation_summary (joined on 'sample' for truncating_total).
@@ -415,7 +415,7 @@ def module3_nmd_summary(cohort: pd.DataFrame, variant_tbl: pd.DataFrame,
 
 
 def module4_neoepitope_summary(cohort: pd.DataFrame) -> pd.DataFrame:
-    """Module 4 — per-sample neoepitope (binder) burden and clonality.
+    """Module 4 - per-sample neoepitope (binder) burden and clonality.
 
     Input:   cohort table augmented with binder_class / clonality.
     Output:  one row per sample with columns sample, patient, timepoint,
@@ -447,7 +447,7 @@ def module4_neoepitope_summary(cohort: pd.DataFrame) -> pd.DataFrame:
 
 def module5_neoepitope_nmd_summary(cohort: pd.DataFrame,
                                    variant_tbl: pd.DataFrame) -> pd.DataFrame:
-    """Module 5 — per-sample neoepitopes split by their variant's NMD class.
+    """Module 5 - per-sample neoepitopes split by their variant's NMD class.
 
     Inputs:  cohort table (augmented), and the per-variant NMD table (Module B)
              used to look up each neoepitope's variant-level NMD consensus.
@@ -492,7 +492,7 @@ def module5_neoepitope_nmd_summary(cohort: pd.DataFrame,
 
 
 # ═════════════════════════════════════════════════════════════════════════════
-# PAIRED STATISTICS (Stage 3 — Wilcoxon signed-rank + BH-FDR)
+# PAIRED STATISTICS (Stage 3 - Wilcoxon signed-rank + BH-FDR)
 # ═════════════════════════════════════════════════════════════════════════════
 
 # (module, metric) pairs tested in paired_stats_stage3.tsv.
@@ -612,7 +612,7 @@ def _paired_arrays(wide: pd.DataFrame, metric: str
 
 
 def _p_annotation(stats: pd.DataFrame, metric: str) -> str:
-    """Format 'p = … (Δ̃ = …)' annotation for ``metric`` from the stats table."""
+    """Format 'p = ... (Δ̃ = ...)' annotation for ``metric`` from the stats table."""
     row = stats[stats.metric == metric]
     if row.empty:
         return ""
@@ -758,64 +758,64 @@ def make_module_plots(wide: pd.DataFrame, stats: pd.DataFrame, out_dir: Path,
     # Module 3
     b["m3_paired"] = plot_paired_metric(
         wide, stats, "nmd_fraction", "NMD fraction",
-        "M3 — Paired NMD-sensitive fraction (FS)", out_dir,
+        "M3 - Paired NMD-sensitive fraction (FS)", out_dir,
         "m3_paired_nmd_fraction.png")
     b["m3_delta"] = plot_waterfall(
         wide, "nmd_fraction", "Δ NMD fraction (recurrent − primary)",
-        "M3 — Change in NMD-sensitive fraction", out_dir,
+        "M3 - Change in NMD-sensitive fraction", out_dir,
         "m3_delta_nmd_fraction.png")
     b["m3_stacked"] = plot_stacked_two(
         wide, "nmd_sensitive", "nmd_insensitive", "NMD-sensitive",
         "NMD-escape (insensitive)", COL_SENS, COL_ESC, "FS variant count",
-        "M3 — NMD-sensitive vs escape per sample", out_dir,
+        "M3 - NMD-sensitive vs escape per sample", out_dir,
         "m3_stacked_sensitive_escape.png")
     b["m3_scatter"] = plot_scatter(
         wide, "truncating_in_pvacseq", "nmd_sensitive",
         "Truncating variants in pVACseq", "NMD-sensitive variants",
-        "M3 — Truncating burden vs NMD-sensitive count", out_dir,
+        "M3 - Truncating burden vs NMD-sensitive count", out_dir,
         "m3_scatter_trunc_vs_nmdsens.png")
 
     # Module 4
     b["m4_paired"] = plot_paired_two_panel(
         wide, "total_peptides", "strong_binders", "Total binders",
-        "Strong binders", "M4 — Paired neoepitope burden", out_dir,
+        "Strong binders", "M4 - Paired neoepitope burden", out_dir,
         "m4_paired_neoepitope_burden.png")
     b["m4_stacked"] = plot_stacked_two(
         wide, "clonal_binders", "subclonal_binders", "Clonal binders",
         "Subclonal binders", COL_CLONAL, COL_SUBCLONAL, "Binder count",
-        "M4 — Binder clonality per sample", out_dir, "m4_stacked_clonality.png")
+        "M4 - Binder clonality per sample", out_dir, "m4_stacked_clonality.png")
     if have_stage1 and "tmb_per_mb" in wide.columns:
         b["m4_scatter"] = plot_scatter(
             wide, "tmb_per_mb", "strong_binders", "TMB per Mb (log scale)",
-            "Strong binders", "M4 — TMB vs strong-binder burden", out_dir,
+            "Strong binders", "M4 - TMB vs strong-binder burden", out_dir,
             "m4_scatter_tmb_vs_neo.png", logx=True)
     else:
-        print("  [WARN] Stage 1 TMB unavailable — skipping m4_scatter_tmb_vs_neo.png")
+        print("  [WARN] Stage 1 TMB unavailable - skipping m4_scatter_tmb_vs_neo.png")
         b["m4_scatter"] = ""
     b["m4_delta"] = plot_waterfall(
         wide, "strong_binders", "Δ strong binders (recurrent − primary)",
-        "M4 — Change in strong-binder burden", out_dir,
+        "M4 - Change in strong-binder burden", out_dir,
         "m4_delta_neoepitopes.png")
 
     # Module 5
     b["m5_paired"] = plot_paired_metric(
         wide, stats, "fraction_escape_strong", "Fraction NMD-escape (strong)",
-        "M5 — Paired NMD-escape fraction (strong binders)", out_dir,
+        "M5 - Paired NMD-escape fraction (strong binders)", out_dir,
         "m5_paired_fraction_escape.png")
     b["m5_stacked"] = plot_stacked_two(
         wide, "nmd_sensitive_neo_strong", "nmd_escape_neo_strong",
         "NMD-sensitive neo", "NMD-escape neo", COL_SENS, COL_ESC,
         "Strong neoepitope count",
-        "M5 — Sensitive vs escape neoepitopes per sample (strong)", out_dir,
+        "M5 - Sensitive vs escape neoepitopes per sample (strong)", out_dir,
         "m5_stacked_sensitive_escape_neo.png")
     b["m5_delta"] = plot_waterfall(
         wide, "fraction_escape_strong",
         "Δ NMD-escape fraction (recurrent − primary)",
-        "M5 — Change in NMD-escape fraction (strong)", out_dir,
+        "M5 - Change in NMD-escape fraction (strong)", out_dir,
         "m5_delta_fraction_escape.png")
     b["m5_paired_count"] = plot_paired_metric(
         wide, stats, "nmd_sensitive_neo_strong", "NMD-sensitive neoepitopes",
-        "M5 — Paired NMD-sensitive neoepitope count (strong)", out_dir,
+        "M5 - Paired NMD-sensitive neoepitope count (strong)", out_dir,
         "m5_paired_nmd_sensitive_neo.png")
     return b
 
@@ -1029,29 +1029,29 @@ def _img(b64, caption):
 
 METHODS_BLOCK = """
 <h2>NMD scoring methods</h2>
-<h3>Method 1 — VEP NMD plugin</h3>
+<h3>Method 1 - VEP NMD plugin</h3>
 <p class="sub">
   The VEP NMD plugin (Ensembl v105+) annotates truncating variants with
   <code>NMD_escaping_variant</code> when the PTC is predicted to escape NMD. An empty
   NMD field on a truncating variant means NMD is triggered (SENSITIVE).
 </p>
 
-<h3>Method 2 — Lindeboom rules (Nat Genet 2019)</h3>
+<h3>Method 2 - Lindeboom rules (Nat Genet 2019)</h3>
 <p class="sub">Applied to frameshift and stop-gained variants. Rules in priority order:</p>
 <ul style="font-size:13px;color:#444;margin:0 0 12px 20px;line-height:1.8">
-  <li><strong>Rule 4 — Start-proximal PTC (&lt;150 nt):</strong> Pioneer round completes before NMD surveillance → INSENSITIVE</li>
-  <li><strong>Rule 1 — Last exon:</strong> No downstream EJC to trigger NMD → INSENSITIVE</li>
-  <li><strong>Rule 3 — Long exon (&gt;407 nt):</strong> EJC too far downstream → INSENSITIVE</li>
-  <li><strong>Rule 2 — 55 nt boundary:</strong> PTC &gt;55 nt upstream of last EJC → SENSITIVE (canonical NMD)</li>
+  <li><strong>Rule 4 - Start-proximal PTC (&lt;150 nt):</strong> Pioneer round completes before NMD surveillance → INSENSITIVE</li>
+  <li><strong>Rule 1 - Last exon:</strong> No downstream EJC to trigger NMD → INSENSITIVE</li>
+  <li><strong>Rule 3 - Long exon (&gt;407 nt):</strong> EJC too far downstream → INSENSITIVE</li>
+  <li><strong>Rule 2 - 55 nt boundary:</strong> PTC &gt;55 nt upstream of last EJC → SENSITIVE (canonical NMD)</li>
 </ul>
 
 <h3>Ensemble confidence (0–3)</h3>
 <p class="sub">3 = both methods agree; 2 = single method available; 1 = methods disagree; 0 = no data.</p>
 
 <h2>Priority tiers</h2>
-<div class="tier-block"><span class="tier-1-h">TIER 1</span> — NMD-sensitive + IC50 &lt; 50 nM. Primary therapeutic targets — silenced by NMD, exposed by NMD inhibition.</div>
-<div class="tier-block"><span class="tier-2-h">TIER 2</span> — NMD-sensitive + IC50 50–500 nM. Moderate binders, potentially relevant after NMD inhibition.</div>
-<div class="tier-block"><span class="tier-3-h">TIER 3</span> — NMD-insensitive + IC50 &lt; 500 nM. Already expressed — controls for immune response without NMD inhibition.</div>
+<div class="tier-block"><span class="tier-1-h">TIER 1</span> - NMD-sensitive + IC50 &lt; 50 nM. Primary therapeutic targets - silenced by NMD, exposed by NMD inhibition.</div>
+<div class="tier-block"><span class="tier-2-h">TIER 2</span> - NMD-sensitive + IC50 50–500 nM. Moderate binders, potentially relevant after NMD inhibition.</div>
+<div class="tier-block"><span class="tier-3-h">TIER 3</span> - NMD-insensitive + IC50 &lt; 500 nM. Already expressed - controls for immune response without NMD inhibition.</div>
 """
 
 
@@ -1213,8 +1213,8 @@ function renderTable(rows) {
       + `<td>${escapeHTML(r.gene)}</td>`
       + `<td><code>${escapeHTML(r.pep)}</code></td>`
       + `<td>${escapeHTML(r.hla)}</td>`
-      + `<td>${r.ic50 == null ? '—' : r.ic50.toFixed(2)}</td>`
-      + `<td>${r.median == null ? '—' : r.median.toFixed(1)}</td>`
+      + `<td>${r.ic50 == null ? '-' : r.ic50.toFixed(2)}</td>`
+      + `<td>${r.median == null ? '-' : r.median.toFixed(1)}</td>`
       + `<td>${escapeHTML(r.method)}</td>`
       + `<td style="color:${nmdColor(r.nmd)};">${escapeHTML(r.nmd)}</td>`
       + `<td>${tierBadge}</td>`
@@ -1262,7 +1262,7 @@ function renderPanel(pid, tp) {
   panel.candidates.forEach((c, i) => {
     const opt = document.createElement('option');
     opt.value = i;
-    opt.textContent = `${c.gene} · ${c.hla} · ${c.tier} · ${c.ic50 != null ? c.ic50.toFixed(2)+' nM' : '—'}`;
+    opt.textContent = `${c.gene} · ${c.hla} · ${c.tier} · ${c.ic50 != null ? c.ic50.toFixed(2)+' nM' : '-'}`;
     candSel.appendChild(opt);
   });
   if (panel.candidates.length) renderCandidate(pid, tp, 0);
@@ -1280,7 +1280,7 @@ function renderCandidate(pid, tp, idx) {
   cmetaEl.innerHTML = `<strong>${c.gene}</strong> · <code>${c.pep}</code> · ${c.hla} · `
     + `${c.vtype} · ${tierBadge}<br>`
     + `NMD: <span style="color:${nmdColor(c.nmd)};">${c.nmd}</span> (${c.conf}) · `
-    + `best: ${c.method}@${c.ic50 != null ? c.ic50.toFixed(2) : '—'} nM · median ${c.median != null ? c.median.toFixed(1) : '—'} nM`;
+    + `best: ${c.method}@${c.ic50 != null ? c.ic50.toFixed(2) : '-'} nM · median ${c.median != null ? c.median.toFixed(1) : '-'} nM`;
   if (c.rule) cmetaEl.innerHTML += `<br><span style="font-size:11px;color:#666;">${escapeHTML(c.rule)}</span>`;
 
   const items = METHOD_ORDER.map(m => ({
@@ -1415,7 +1415,7 @@ def _stats_table_html(stats: pd.DataFrame, module: str) -> str:
     def fmt(v: object) -> str:
         if isinstance(v, float):
             if pd.isna(v):
-                return "—"
+                return "-"
             return f"{v:.4g}"
         return str(v)
 
@@ -1434,7 +1434,7 @@ def _df_table_html(df: pd.DataFrame, empty: str = "No data.") -> str:
     def fmt(v: object) -> str:
         if isinstance(v, float):
             if pd.isna(v):
-                return "—"
+                return "-"
             return f"{v:.4g}"
         return str(v)
 
@@ -1482,7 +1482,7 @@ def generate_report(cohort: pd.DataFrame, fs_cohort: pd.DataFrame,
             "<body><div class='page'><h1>NMD Cohort Report</h1>"
             "<p class='sub'>No candidates found across cohort.</p>"
             "</div></body></html>")
-        print("[REPORT] Cohort empty — wrote stub")
+        print("[REPORT] Cohort empty - wrote stub")
         return
 
     # Static plots
@@ -1564,7 +1564,7 @@ def generate_report(cohort: pd.DataFrame, fs_cohort: pd.DataFrame,
 
     # ── Module 3/4/5 sections ────────────────────────────────────────────────
     module3_block = f"""
-<h2>Module 3 — NMD-sensitive mutation enrichment</h2>
+<h2>Module 3 - NMD-sensitive mutation enrichment</h2>
 <p class="sub">
   Variant-level NMD aggregation over truncating (frameshift) variants. Each
   variant is classified once (worst-case across its peptides). NMD fraction =
@@ -1582,7 +1582,7 @@ def generate_report(cohort: pd.DataFrame, fs_cohort: pd.DataFrame,
 """
 
     module4_block = f"""
-<h2>Module 4 — Neoepitope burden</h2>
+<h2>Module 4 - Neoepitope burden</h2>
 <p class="sub">
   Per-sample binder burden across all candidate peptides. Strong &lt;50 nM,
   Weak 50–500 nM, Non-binder ≥500 nM. Clonality from Tumor DNA VAF
@@ -1590,7 +1590,7 @@ def generate_report(cohort: pd.DataFrame, fs_cohort: pd.DataFrame,
 </p>
 {_img(module_imgs.get("m4_paired",""), "M4 Fig 1. Paired total and strong binder burden.")}
 {_img(module_imgs.get("m4_stacked",""), "M4 Fig 2. Clonal vs subclonal binders per sample.")}
-{_img(module_imgs.get("m4_scatter",""), "M4 Fig 3. TMB (Stage 1, log) vs strong-binder burden.") if module_imgs.get("m4_scatter") else "<p class='note'>TMB-vs-neoepitope scatter skipped — Stage 1 summary not provided.</p>"}
+{_img(module_imgs.get("m4_scatter",""), "M4 Fig 3. TMB (Stage 1, log) vs strong-binder burden.") if module_imgs.get("m4_scatter") else "<p class='note'>TMB-vs-neoepitope scatter skipped - Stage 1 summary not provided.</p>"}
 {_img(module_imgs.get("m4_delta",""), "M4 Fig 4. Δ strong binders (recurrent − primary), sorted.")}
 <h3>Per-sample neoepitope summary</h3>
 {_df_table_html(mod4, "No Module 4 data.")}
@@ -1599,7 +1599,7 @@ def generate_report(cohort: pd.DataFrame, fs_cohort: pd.DataFrame,
 """
 
     module5_block = f"""
-<h2>Module 5 — Neoepitopes by NMD <span style="font-size:12px;color:#888;">(the central mechanistic result)</span></h2>
+<h2>Module 5 - Neoepitopes by NMD <span style="font-size:12px;color:#888;">(the central mechanistic result)</span></h2>
 <p class="sub">
   Neoepitopes (Strong/Weak binders) split by their variant's NMD class.
   fraction_escape = escape / (escape + sensitive); UNCERTAIN/UNKNOWN excluded.
@@ -1607,7 +1607,7 @@ def generate_report(cohort: pd.DataFrame, fs_cohort: pd.DataFrame,
   escape (immune visibility) or toward NMD-sensitive silencing.
 </p>
 <div style="border:2px solid #D85A30;border-radius:8px;padding:8px 12px;margin:12px 0;background:#fffaf7;">
-  <h3 style="margin-top:4px;color:#9a3a14;">Headline figure — paired NMD-escape fraction (strong binders)</h3>
+  <h3 style="margin-top:4px;color:#9a3a14;">Headline figure - paired NMD-escape fraction (strong binders)</h3>
   {_img(module_imgs.get("m5_paired",""), "M5 Fig 1 (HEADLINE). Paired fraction_escape_strong, primary vs recurrent, with p-value and median Δ.")}
 </div>
 {_img(module_imgs.get("m5_stacked",""), "M5 Fig 2. NMD-sensitive vs escape strong neoepitopes per sample.")}
@@ -1623,7 +1623,7 @@ def generate_report(cohort: pd.DataFrame, fs_cohort: pd.DataFrame,
 <title>GBM NMD Cohort Report</title><style>{CSS}</style></head>
 <body><div class="page">
 
-<h1>GBM Pipeline — Stage 3: NMD Cohort Summary</h1>
+<h1>GBM Pipeline - Stage 3: NMD Cohort Summary</h1>
 <p style="color:#888;font-size:13px;margin-top:4px;">
   GBM NMD-Neoantigen Pipeline &middot; github.com/paleslui/gbm-nmd-pipeline
 </p>
@@ -1660,7 +1660,7 @@ def generate_report(cohort: pd.DataFrame, fs_cohort: pd.DataFrame,
   Only when both T and M timepoints are empty does a patient drop out of the cohort entirely.
 </p>
 
-<h2>Variant landscape — input candidates by type</h2>
+<h2>Variant landscape - input candidates by type</h2>
 <p class="sub">
   Distribution of all <strong>{n_total}</strong> pVACseq candidates across the cohort.
   Frameshift (FS) is the only NMD-actionable variant type for neoantigen-based
@@ -1673,7 +1673,7 @@ def generate_report(cohort: pd.DataFrame, fs_cohort: pd.DataFrame,
   <strong>Why we focus on frameshift only:</strong>
   <em>Missense</em> variants are not NMD-relevant (they replace one amino acid without
   introducing a PTC). <em>Stop-gained</em> variants are NMD-relevant but truncate
-  the protein without generating novel peptide sequences — pVACseq does not
+  the protein without generating novel peptide sequences - pVACseq does not
   emit peptide candidates for them, so they are not actionable for neoantigen
   vaccines. <em>Inframe</em> indels do not introduce PTCs.
 </div>
@@ -1702,7 +1702,7 @@ def generate_report(cohort: pd.DataFrame, fs_cohort: pd.DataFrame,
 
 {widget_block}
 
-<h2>IC50 distribution by NMD class — top 50 strongest binders (FS only)</h2>
+<h2>IC50 distribution by NMD class - top 50 strongest binders (FS only)</h2>
 {_img(img_ic50, "Fig 5. Top 50 frameshift candidates across the cohort, sorted by best IC50, colored by NMD consensus.")}
 
 <h2>Top genes producing TIER1 candidates</h2>
@@ -1721,13 +1721,13 @@ high-confidence binders are the strongest therapeutic targets.</p>
 <p class="sub">Score 3 = both methods agree; 2 = single method; 1 = disagree; 0 = no data.</p>
 {conf_cards()}
 
-<h2>TIER 1 — NMD-sensitive + IC50 &lt; 50 nM (top 30 across cohort by IC50)</h2>
+<h2>TIER 1 - NMD-sensitive + IC50 &lt; 50 nM (top 30 across cohort by IC50)</h2>
 {_tbl(t1, COLS, "No Tier 1 candidates in this cohort.")}
 
-<h2>TIER 2 — NMD-sensitive + IC50 50–500 nM (top 30 across cohort by IC50)</h2>
+<h2>TIER 2 - NMD-sensitive + IC50 50–500 nM (top 30 across cohort by IC50)</h2>
 {_tbl(t2, COLS, "No Tier 2 candidates in this cohort.")}
 
-<h2>TIER 3 — NMD-insensitive controls (top 30 across cohort by IC50)</h2>
+<h2>TIER 3 - NMD-insensitive controls (top 30 across cohort by IC50)</h2>
 {_tbl(t3, COLS, "No Tier 3 candidates in this cohort.")}
 
 </div></body></html>"""
@@ -1754,7 +1754,7 @@ def main():
     Returns:
         None.
     """
-    ap = argparse.ArgumentParser(description="GBM Stage 3 — NMD cohort summary")
+    ap = argparse.ArgumentParser(description="GBM Stage 3 - NMD cohort summary")
     ap.add_argument("--input_dir", required=True, type=Path,
                     help="Directory containing per-sample subdirs (each with nmd_scored_candidates.tsv)")
     ap.add_argument("--out_dir", required=True, type=Path,
@@ -1767,7 +1767,7 @@ def main():
 
     args.out_dir.mkdir(parents=True, exist_ok=True)
 
-    print(f"\n{'='*60}\n  GBM Pipeline — Stage 3 cohort summary\n{'='*60}\n")
+    print(f"\n{'='*60}\n  GBM Pipeline - Stage 3 cohort summary\n{'='*60}\n")
     print(f"[INFO] Reading per-sample dirs from: {args.input_dir}")
 
     # ── optional Stage 1 joins (graceful fallback) ──────────────────────────

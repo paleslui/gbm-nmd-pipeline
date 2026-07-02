@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """
-nmd_scoring.py — GBM Pipeline Stage 3: per-sample NMD Sensitivity Scoring
+nmd_scoring.py - GBM Pipeline Stage 3: per-sample NMD Sensitivity Scoring
 Part of the GBM NMD-Neoantigen Pipeline.
 https://github.com/paleslui/gbm-nmd-pipeline
 
 Scores each pVACseq neoantigen candidate for NMD sensitivity using an ensemble
 of two methods:
-  1. VEP NMD plugin (CSQ field) — requires Dragen/VEP-annotated VCF
+  1. VEP NMD plugin (CSQ field) - requires Dragen/VEP-annotated VCF
   2. Lindeboom et al. 2019 rule-based method (4 rules)
 
 Ensemble confidence 0-3: 3=both agree, 2=single method, 1=disagree, 0=no data.
@@ -17,10 +17,10 @@ INPUTS
 ------
   --pvacseq_tsv   pVACseq neoantigen candidates for one sample, e.g.
                   2_pvacseq/pvactools/<sample>/MHC_Class_I/<sample>.filtered.tsv
-                  (required — one neoantigen candidate per row)
+                  (required - one neoantigen candidate per row)
   --vep_vcf       VEP-annotated VCF (optionally gzipped) for the same sample,
                   used to read the NMD plugin field from the CSQ annotation.
-                  Optional — scoring falls back to Lindeboom rules only if absent.
+                  Optional - scoring falls back to Lindeboom rules only if absent.
 
 OUTPUTS (written to --out_dir)
 ------------------------------
@@ -45,9 +45,9 @@ import matplotlib; matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import io, base64
 
-COL_S = "#D85A30"   # sensitive  — coral
-COL_I = "#378ADD"   # insensitive — blue
-COL_U = "#F0C040"   # uncertain  — amber
+COL_S = "#D85A30"   # sensitive  - coral
+COL_I = "#378ADD"   # insensitive - blue
+COL_U = "#F0C040"   # uncertain  - amber
 
 TRUNCATING = ['stop_gained', 'frameshift', 'stop_lost', 'start_lost',
               'splice_donor', 'splice_acceptor']
@@ -101,7 +101,7 @@ def parse_vep_vcf(vcf_path: Path) -> dict:
     """
     fields = parse_csq_header(vcf_path)
     if not fields:
-        print("[WARN] Could not parse CSQ header — VEP NMD plugin scoring skipped")
+        print("[WARN] Could not parse CSQ header - VEP NMD plugin scoring skipped")
         return {}
     print(f"[INFO] CSQ fields found: {len(fields)}")
     print(f"[INFO] NMD plugin field present: {'NMD' in fields}")
@@ -263,10 +263,10 @@ def ensemble_nmd(vep: str, rule: str) -> tuple:
 # ═════════════════════════════════════════════════════════════════════════════
 
 RULE_EXPLANATIONS = {
-    'rule1_last_exon':             'PTC in last exon — no downstream EJC',
-    'rule2_55nt_boundary':         'PTC >55nt upstream of last exon junction — NMD-sensitive',
-    'rule3_long_exon_>407nt':      'PTC in long exon (>407nt) — reduced EJC density',
-    'rule4_start_proximal_<150nt': 'PTC within 150nt of start codon — ribosome reinitiation',
+    'rule1_last_exon':             'PTC in last exon - no downstream EJC',
+    'rule2_55nt_boundary':         'PTC >55nt upstream of last exon junction - NMD-sensitive',
+    'rule3_long_exon_>407nt':      'PTC in long exon (>407nt) - reduced EJC density',
+    'rule4_start_proximal_<150nt': 'PTC within 150nt of start codon - ribosome reinitiation',
 }
 
 
@@ -333,7 +333,7 @@ def hla_allele_breakdown(scored_df: pd.DataFrame) -> pd.DataFrame:
     # filtered.tsv) produce a column-less empty scored_df, so accessing
     # ['priority_tier'] raised KeyError and crashed Stage 3 (regression vs the
     # May-2026 backup, which scored these 7 samples as empty per_sample dirs).
-    # Guard the empty/missing-column case up front — restores prior behavior.
+    # Guard the empty/missing-column case up front - restores prior behavior.
     if scored_df.empty or 'priority_tier' not in scored_df.columns:
         return pd.DataFrame()
     t12 = scored_df[scored_df['priority_tier'].isin(['TIER1','TIER2'])]
@@ -351,10 +351,10 @@ def hla_allele_breakdown(scored_df: pd.DataFrame) -> pd.DataFrame:
 # ═════════════════════════════════════════════════════════════════════════════
 # VISUALISATIONS
 #   _b64fig:        convert matplotlib figure to base64 PNG for HTML embedding
-#   plot_tiers:     horizontal bar — candidates per tier
-#   plot_ic50:      scatter — IC50 by candidate, colored by NMD class
-#   plot_nmd_breakdown: grouped bar — classification per method
-#   plot_confidence: bar — confidence score distribution
+#   plot_tiers:     horizontal bar - candidates per tier
+#   plot_ic50:      scatter - IC50 by candidate, colored by NMD class
+#   plot_nmd_breakdown: grouped bar - classification per method
+#   plot_confidence: bar - confidence score distribution
 # ═════════════════════════════════════════════════════════════════════════════
 
 def _b64fig(fig) -> str:
@@ -430,7 +430,7 @@ def plot_ic50(scored_df: pd.DataFrame) -> str:
     if xmin <= 500 <= xmax:
         ax.axvline(500, color='#999', linestyle=':', lw=0.8, label='500 nM (Tier 2/3 threshold)')
     ax.set_xlabel("Best MT IC50 Score (nM)")
-    ax.set_title("IC50 per candidate — colored by NMD consensus", fontsize=12)
+    ax.set_title("IC50 per candidate - colored by NMD consensus", fontsize=12)
     from matplotlib.patches import Patch
     legend_handles = [Patch(color=v, label=k) for k, v in color_map.items()
                       if k in df['nmd_consensus'].values]
@@ -470,7 +470,7 @@ def plot_nmd_breakdown(scored_df: pd.DataFrame) -> str:
 def plot_confidence(scored_df: pd.DataFrame) -> str:
     """Bar: confidence score distribution (0-3)."""
     scores = [3, 2, 1, 0]
-    labels = ['3 — both agree', '2 — single method', '1 — disagree', '0 — no data']
+    labels = ['3 - both agree', '2 - single method', '1 - disagree', '0 - no data']
     colors = ['#4caf50', '#ff9800', '#f44336', '#9e9e9e']
     counts = [int((scored_df['nmd_confidence_score'] == s).sum()) for s in scores]
     fig, ax = plt.subplots(figsize=(7, 3))
@@ -575,7 +575,7 @@ def generate_report(scored_df: pd.DataFrame, out_dir: Path):
 <title>GBM NMD Scoring Report</title><style>{CSS}</style></head>
 <body><div class="page">
 
-<h1>GBM Pipeline — Stage 7: NMD Sensitivity Scoring</h1>
+<h1>GBM Pipeline - Stage 7: NMD Sensitivity Scoring</h1>
 <p style="color:#888;font-size:13px;margin-top:4px;">
   GBM NMD-Neoantigen Pipeline &middot; github.com/paleslui/gbm-nmd-pipeline
 </p>
@@ -584,7 +584,7 @@ def generate_report(scored_df: pd.DataFrame, out_dir: Path):
 <p class="sub">
   Each pVACseq neoantigen candidate is classified by NMD sensitivity using an ensemble of two
   methods: the VEP NMD plugin and Lindeboom et al. 2019 rule-based scoring.
-  The core hypothesis is that TMZ-induced frameshift mutations create PTCs silenced by NMD —
+  The core hypothesis is that TMZ-induced frameshift mutations create PTCs silenced by NMD -
   NMD inhibition could expose these neoantigens to immune recognition.
 </p>
 
@@ -610,7 +610,7 @@ Alleles with multiple high-confidence binders are the strongest therapeutic targ
 
 <h2>NMD Classification per Method</h2>
 <div style="margin:16px 0;"><img src="{img_method}" style="max-width:85%;display:block;margin:0 auto;border-radius:4px;box-shadow:0 1px 4px rgba(0,0,0,.12);">
-<p style="font-size:11px;color:#888;margin-top:6px;">Fig 3. NMD classification per scoring method — VEP plugin, Lindeboom rules, and ensemble consensus.</p></div>
+<p style="font-size:11px;color:#888;margin-top:6px;">Fig 3. NMD classification per scoring method - VEP plugin, Lindeboom rules, and ensemble consensus.</p></div>
 
 <h2>Confidence Score Distribution</h2>
 <div style="margin:16px 0;"><img src="{img_conf}" style="max-width:85%;display:block;margin:0 auto;border-radius:4px;box-shadow:0 1px 4px rgba(0,0,0,.12);">
@@ -619,39 +619,39 @@ Alleles with multiple high-confidence binders are the strongest therapeutic targ
 {conf_cards()}
 
 <h2>NMD Scoring Methods</h2>
-<h3>Method 1 — VEP NMD Plugin</h3>
+<h3>Method 1 - VEP NMD Plugin</h3>
 <p class="sub">
   The VEP NMD plugin (Ensembl v105+) annotates truncating variants with NMD_escaping_variant
   when the PTC is predicted to escape NMD. An empty NMD field on a truncating variant means
   NMD is triggered (SENSITIVE). Requires Dragen VEP-annotated VCF with --plugin NMD.
 </p>
 
-<h3>Method 2 — Lindeboom Rules (Nat Cell Biol 2019)</h3>
+<h3>Method 2 - Lindeboom Rules (Nat Cell Biol 2019)</h3>
 <p class="sub">Applied to frameshift and stop-gained variants. Rules in priority order:</p>
 <ul style="font-size:13px;color:#444;margin:0 0 12px 20px;line-height:1.8">
-  <li><strong>Rule 4 — Start-proximal PTC (&lt;150nt):</strong> Pioneer round completes before NMD surveillance → INSENSITIVE</li>
-  <li><strong>Rule 1 — Last exon:</strong> No downstream EJC to trigger NMD → INSENSITIVE</li>
-  <li><strong>Rule 3 — Long exon (&gt;407nt):</strong> EJC too far downstream → INSENSITIVE</li>
-  <li><strong>Rule 2 — 55nt boundary:</strong> PTC &gt;55nt upstream of last EJC → SENSITIVE (canonical NMD)</li>
+  <li><strong>Rule 4 - Start-proximal PTC (&lt;150nt):</strong> Pioneer round completes before NMD surveillance → INSENSITIVE</li>
+  <li><strong>Rule 1 - Last exon:</strong> No downstream EJC to trigger NMD → INSENSITIVE</li>
+  <li><strong>Rule 3 - Long exon (&gt;407nt):</strong> EJC too far downstream → INSENSITIVE</li>
+  <li><strong>Rule 2 - 55nt boundary:</strong> PTC &gt;55nt upstream of last EJC → SENSITIVE (canonical NMD)</li>
 </ul>
 <div class="note">⚠ NMD rules only apply to truncating mutations.
 Missense variants (NOT_APPLICABLE) are not subject to NMD but remain immunogenic neoantigen candidates.</div>
 
 <h2>Priority Tiers</h2>
 <ul style="font-size:13px;color:#444;margin:0 0 12px 20px;line-height:1.8">
-  <li><strong>Tier 1 — NMD-sensitive + IC50 &lt;50 nM:</strong> Primary therapeutic targets — NMD inhibition could expose these neoantigens.</li>
-  <li><strong>Tier 2 — NMD-sensitive + IC50 50–500 nM:</strong> Moderate binders, potentially relevant after NMD inhibition.</li>
-  <li><strong>Tier 3 — NMD-insensitive + IC50 &lt;500 nM:</strong> Already translated — controls for immune response without NMD inhibition.</li>
+  <li><strong>Tier 1 - NMD-sensitive + IC50 &lt;50 nM:</strong> Primary therapeutic targets - NMD inhibition could expose these neoantigens.</li>
+  <li><strong>Tier 2 - NMD-sensitive + IC50 50–500 nM:</strong> Moderate binders, potentially relevant after NMD inhibition.</li>
+  <li><strong>Tier 3 - NMD-insensitive + IC50 &lt;500 nM:</strong> Already translated - controls for immune response without NMD inhibition.</li>
   <li><strong>Unclassified:</strong> Missense variants or insufficient transcript information.</li>
 </ul>
 
-<h2>Tier 1 — NMD-sensitive + IC50 &lt;50 nM</h2>
+<h2>Tier 1 - NMD-sensitive + IC50 &lt;50 nM</h2>
 {tbl(t1, COLS, "No Tier 1 candidates in this sample.")}
 
-<h2>Tier 2 — NMD-sensitive + IC50 50–500 nM</h2>
+<h2>Tier 2 - NMD-sensitive + IC50 50–500 nM</h2>
 {tbl(t2, COLS, "No Tier 2 candidates in this sample.")}
 
-<h2>Tier 3 — NMD-insensitive controls</h2>
+<h2>Tier 3 - NMD-insensitive controls</h2>
 {tbl(t3, COLS, "No Tier 3 candidates in this sample.")}
 
 <h2>All Candidates</h2>
@@ -683,7 +683,7 @@ def main():
     """
     parser = argparse.ArgumentParser(
         description=(
-            "GBM Pipeline Stage 3 — per-sample NMD sensitivity scoring. "
+            "GBM Pipeline Stage 3 - per-sample NMD sensitivity scoring. "
             "Reads pVACseq neoantigen candidates (--pvacseq_tsv) and, optionally, "
             "a VEP-annotated VCF (--vep_vcf) for the NMD plugin field, then writes "
             "nmd_scored_candidates.tsv, nmd_hla_breakdown.tsv and report_nmd.html "
@@ -693,7 +693,7 @@ def main():
     parser.add_argument('--pvacseq_tsv', required=True,
                         help='pVACseq candidates TSV for one sample (required).')
     parser.add_argument('--vep_vcf', default=None,
-                        help='VEP-annotated VCF (gzipped). Optional — rule-based only if absent.')
+                        help='VEP-annotated VCF (gzipped). Optional - rule-based only if absent.')
     parser.add_argument('--out_dir', default='./nmd_output',
                         help='Output directory for the per-sample NMD report.')
     args = parser.parse_args()
@@ -711,7 +711,7 @@ def main():
         print(f"\n[INFO] Parsing VEP VCF: {args.vep_vcf}")
         vep_variants = parse_vep_vcf(Path(args.vep_vcf))
     else:
-        print("\n[INFO] No VEP VCF provided — rule-based scoring only")
+        print("\n[INFO] No VEP VCF provided - rule-based scoring only")
 
     print("\n[INFO] Scoring NMD sensitivity...")
     scored_df = score_candidates(pvacseq_df, vep_variants)
@@ -724,9 +724,9 @@ def main():
     # 'nmd_consensus'/'priority_tier' exist and crash with KeyError (regression
     # vs the May-2026 backup). The backup emitted ONLY an empty
     # nmd_scored_candidates.tsv for such samples (7 of 56: 5_T,5_M,6_T,17_T,
-    # 18_T,36_T,52_M) — reproduce that exactly by returning early here.
+    # 18_T,36_T,52_M) - reproduce that exactly by returning early here.
     if scored_df.empty:
-        print("[INFO] 0 scored candidates — empty sample; wrote "
+        print("[INFO] 0 scored candidates - empty sample; wrote "
               "nmd_scored_candidates.tsv only (matches baseline behavior).")
         print(f"\n{'='*60}\n  Stage 7 complete (empty sample). "
               f"Output: {out_dir.resolve()}\n{'='*60}\n")

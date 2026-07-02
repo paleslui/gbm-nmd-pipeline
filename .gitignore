@@ -11,7 +11,9 @@ resources/vep_cache/
 resources/iedb/
 
 # Run outputs
-results/
+results/*
+!results/showcase/
+!results/showcase/**
 logs/
 tmp/
 i.*
@@ -67,3 +69,6 @@ reproducibility_baseline/
 
 # VEP_plugins is pre-populated by setup.sh STEP 1c (cluster portability fix)
 resources/VEP_plugins/
+
+# Capture-kit BED files (usually proprietary vendor files)
+resources/*.bed

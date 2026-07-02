@@ -1,0 +1,8 @@
+ENSEMBLVEP_VEP:
+  ensemblvep: 113.0
+  tabix: 1.23.1
+PVACTOOLS_PVACSEQ:
+  pvactools: 5.3.1
+Workflow:
+    nextflow_pvacseq: v1.0dev
+    Nextflow: 25.10.4

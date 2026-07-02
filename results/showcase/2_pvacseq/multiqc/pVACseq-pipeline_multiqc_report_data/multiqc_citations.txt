@@ -1,0 +1,3 @@
+10.1093/bioinformatics/btw354                      # MultiQC
+10.1186/s13059-016-0974-4                          # vep
+

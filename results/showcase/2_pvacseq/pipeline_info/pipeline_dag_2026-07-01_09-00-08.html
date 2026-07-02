@@ -1,0 +1,439 @@
+<!--
+  ~ Copyright 2013-2024, Seqera Labs
+  ~
+  ~ Licensed under the Apache License, Version 2.0 (the "License");
+  ~ you may not use this file except in compliance with the License.
+  ~ You may obtain a copy of the License at
+  ~
+  ~     http://www.apache.org/licenses/LICENSE-2.0
+  ~
+  ~ Unless required by applicable law or agreed to in writing, software
+  ~ distributed under the License is distributed on an "AS IS" BASIS,
+  ~ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+  ~ See the License for the specific language governing permissions and
+  ~ limitations under the License.
+  -->
+<html>
+<head>
+<meta name="viewport" content="width=device-width, user-scalable=no, initial-scale=1, maximum-scale=1">
+</head>
+<body>
+<pre class="mermaid" style="text-align: center;">
+%%{
+  init: {
+    'theme': 'base',
+    'themeVariables': {
+      'primaryColor': '#B6ECE2',
+      'primaryTextColor': '#160F26',
+      'primaryBorderColor': '#065647',
+      'lineColor': '#545555',
+      'clusterBkg': '#BABCBD22',
+      'clusterBorder': '#DDDEDE',
+      'fontFamily': 'arial'
+    }
+  }
+}%%
+flowchart TB
+    subgraph " "
+    v2["Channel.fromPath"]
+    v4["Channel.fromPath"]
+    v8["fasta"]
+    v16["genome"]
+    v17["species"]
+    v18["cache_version"]
+    v19["cache"]
+    v20[" "]
+    v21["extra_files"]
+    v22["vep_plugins"]
+    v30["Channel.fromPath"]
+    v42["pvacseq_iedb_dir"]
+    v44["iedb_source"]
+    v45["iedb_mhc_ii"]
+    v55["algorithms"]
+    v56["blastp_path"]
+    v57["genes_of_interest"]
+    v58["peptide_fasta"]
+    v59["phased_proximal_variants_vcf"]
+    v101["Channel.of"]
+    v104["Channel.fromPath"]
+    v107["ch_workflow_summary"]
+    v111["ch_methods_description"]
+    v118["replace_names"]
+    v119["sample_names"]
+    end
+    subgraph "NF_PVACSEQ [NF_PVACSEQ]"
+    subgraph "NF_PVACSEQ:PVACSEQ_PIPELINE [PVACSEQ_PIPELINE]"
+    v9(["MAF2VCF"])
+    v23(["ENSEMBLVEP_VEP"])
+    subgraph "NF_PVACSEQ:PVACSEQ_PIPELINE:CONFIGURE_PVACSEQ_IEDB [CONFIGURE_PVACSEQ_IEDB]"
+    v43(["DOWNLOAD_MHC_I"])
+    v46(["SMART_LINK_IEDB"])
+    v47(( ))
+    end
+    v53(["CONFIGURE_PVACSEQ"])
+    v60(["PVACTOOLS_PVACSEQ"])
+    v120(["MULTIQC"])
+    v10(( ))
+    v31(( ))
+    v115(( ))
+    v116(( ))
+    v117(( ))
+    v124(( ))
+    end
+    end
+    subgraph " "
+    v24[" "]
+    v25[" "]
+    v26[" "]
+    v50["mode"]
+    v61[" "]
+    v62[" "]
+    v63[" "]
+    v64[" "]
+    v65[" "]
+    v66[" "]
+    v67[" "]
+    v68[" "]
+    v69[" "]
+    v70[" "]
+    v71[" "]
+    v72[" "]
+    v73[" "]
+    v74[" "]
+    v75[" "]
+    v76[" "]
+    v77[" "]
+    v78[" "]
+    v79[" "]
+    v80[" "]
+    v81[" "]
+    v82[" "]
+    v83[" "]
+    v84[" "]
+    v85[" "]
+    v86[" "]
+    v87[" "]
+    v88[" "]
+    v89[" "]
+    v90[" "]
+    v91[" "]
+    v121[" "]
+    v122[" "]
+    v123[" "]
+    v125["multiqc_report"]
+    v127[" "]
+    v129[" "]
+    v131[" "]
+    v133[" "]
+    v135[" "]
+    v137[" "]
+    v139[" "]
+    v141[" "]
+    v143[" "]
+    v145[" "]
+    v147[" "]
+    v149[" "]
+    v151[" "]
+    v153[" "]
+    v155[" "]
+    v157[" "]
+    v159[" "]
+    v161[" "]
+    v163[" "]
+    v165[" "]
+    v167[" "]
+    v169[" "]
+    v171[" "]
+    v173[" "]
+    v175[" "]
+    v177[" "]
+    v179[" "]
+    v181[" "]
+    v183[" "]
+    v185[" "]
+    v187[" "]
+    v189[" "]
+    v191[" "]
+    v193[" "]
+    v195[" "]
+    v197[" "]
+    v199[" "]
+    v201[" "]
+    v203[" "]
+    v205[" "]
+    v207[" "]
+    v209[" "]
+    v211[" "]
+    v213[" "]
+    v215[" "]
+    v217[" "]
+    v219[" "]
+    v221[" "]
+    v223[" "]
+    v225[" "]
+    v227[" "]
+    v229[" "]
+    v231[" "]
+    v233[" "]
+    v235[" "]
+    v237[" "]
+    end
+    v3(( ))
+    v5(( ))
+    v126(( ))
+    v128(( ))
+    v130(( ))
+    v132(( ))
+    v134(( ))
+    v136(( ))
+    v138(( ))
+    v140(( ))
+    v142(( ))
+    v144(( ))
+    v146(( ))
+    v148(( ))
+    v150(( ))
+    v152(( ))
+    v154(( ))
+    v156(( ))
+    v158(( ))
+    v160(( ))
+    v162(( ))
+    v164(( ))
+    v166(( ))
+    v168(( ))
+    v170(( ))
+    v172(( ))
+    v174(( ))
+    v176(( ))
+    v178(( ))
+    v180(( ))
+    v182(( ))
+    v184(( ))
+    v186(( ))
+    v188(( ))
+    v190(( ))
+    v192(( ))
+    v194(( ))
+    v196(( ))
+    v198(( ))
+    v200(( ))
+    v202(( ))
+    v204(( ))
+    v206(( ))
+    v208(( ))
+    v210(( ))
+    v212(( ))
+    v214(( ))
+    v216(( ))
+    v218(( ))
+    v220(( ))
+    v222(( ))
+    v224(( ))
+    v226(( ))
+    v228(( ))
+    v230(( ))
+    v232(( ))
+    v234(( ))
+    v236(( ))
+    v2 --> v3
+    v4 --> v5
+    v8 --> v9
+    v3 --> v9
+    v9 --> v10
+    v16 --> v23
+    v17 --> v23
+    v18 --> v23
+    v19 --> v23
+    v20 --> v23
+    v21 --> v23
+    v22 --> v23
+    v10 --> v23
+    v23 --> v26
+    v23 --> v25
+    v23 --> v24
+    v23 --> v10
+    v23 --> v31
+    v30 --> v31
+    v42 --> v43
+    v43 --> v46
+    v44 --> v46
+    v45 --> v46
+    v46 --> v47
+    v47 --> v50
+    v47 --> v53
+    v53 --> v60
+    v53 --> v126
+    v53 --> v128
+    v53 --> v130
+    v53 --> v132
+    v53 --> v134
+    v53 --> v136
+    v53 --> v138
+    v53 --> v140
+    v53 --> v142
+    v53 --> v144
+    v53 --> v146
+    v53 --> v148
+    v53 --> v150
+    v53 --> v152
+    v53 --> v154
+    v53 --> v156
+    v53 --> v158
+    v53 --> v160
+    v53 --> v162
+    v53 --> v164
+    v53 --> v166
+    v53 --> v168
+    v53 --> v170
+    v53 --> v172
+    v53 --> v174
+    v53 --> v176
+    v53 --> v178
+    v53 --> v180
+    v53 --> v182
+    v53 --> v184
+    v53 --> v186
+    v53 --> v188
+    v53 --> v190
+    v53 --> v192
+    v53 --> v194
+    v53 --> v196
+    v53 --> v198
+    v53 --> v200
+    v53 --> v202
+    v53 --> v204
+    v53 --> v206
+    v53 --> v208
+    v53 --> v210
+    v53 --> v212
+    v53 --> v214
+    v53 --> v216
+    v53 --> v218
+    v53 --> v220
+    v53 --> v222
+    v53 --> v224
+    v53 --> v226
+    v53 --> v228
+    v53 --> v230
+    v53 --> v232
+    v53 --> v234
+    v53 --> v236
+    v55 --> v60
+    v56 --> v60
+    v57 --> v60
+    v58 --> v60
+    v59 --> v60
+    v31 --> v60
+    v60 --> v91
+    v60 --> v90
+    v60 --> v89
+    v60 --> v88
+    v60 --> v87
+    v60 --> v86
+    v60 --> v85
+    v60 --> v84
+    v60 --> v83
+    v60 --> v82
+    v60 --> v81
+    v60 --> v80
+    v60 --> v79
+    v60 --> v78
+    v60 --> v77
+    v60 --> v76
+    v60 --> v75
+    v60 --> v74
+    v60 --> v73
+    v60 --> v72
+    v60 --> v71
+    v60 --> v70
+    v60 --> v69
+    v60 --> v68
+    v60 --> v67
+    v60 --> v66
+    v60 --> v65
+    v60 --> v64
+    v60 --> v63
+    v60 --> v62
+    v60 --> v61
+    v60 --> v10
+    v101 --> v10
+    v104 --> v115
+    v107 --> v10
+    v111 --> v10
+    v118 --> v120
+    v119 --> v120
+    v10 --> v120
+    v115 --> v120
+    v116 --> v120
+    v117 --> v120
+    v120 --> v123
+    v120 --> v122
+    v120 --> v121
+    v120 --> v124
+    v124 --> v125
+    v126 --> v127
+    v128 --> v129
+    v130 --> v131
+    v132 --> v133
+    v134 --> v135
+    v136 --> v137
+    v138 --> v139
+    v140 --> v141
+    v142 --> v143
+    v144 --> v145
+    v146 --> v147
+    v148 --> v149
+    v150 --> v151
+    v152 --> v153
+    v154 --> v155
+    v156 --> v157
+    v158 --> v159
+    v160 --> v161
+    v162 --> v163
+    v164 --> v165
+    v166 --> v167
+    v168 --> v169
+    v170 --> v171
+    v172 --> v173
+    v174 --> v175
+    v176 --> v177
+    v178 --> v179
+    v180 --> v181
+    v182 --> v183
+    v184 --> v185
+    v186 --> v187
+    v188 --> v189
+    v190 --> v191
+    v192 --> v193
+    v194 --> v195
+    v196 --> v197
+    v198 --> v199
+    v200 --> v201
+    v202 --> v203
+    v204 --> v205
+    v206 --> v207
+    v208 --> v209
+    v210 --> v211
+    v212 --> v213
+    v214 --> v215
+    v216 --> v217
+    v218 --> v219
+    v220 --> v221
+    v222 --> v223
+    v224 --> v225
+    v226 --> v227
+    v228 --> v229
+    v230 --> v231
+    v232 --> v233
+    v234 --> v235
+    v236 --> v237
+    v5 --> v10
+
+</pre>
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  mermaid.initialize({ startOnLoad: true, maxTextSize: Number.MAX_SAFE_INTEGER, maxEdges: Number.MAX_SAFE_INTEGER });
+</script>
+</body>
+</html>
