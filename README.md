@@ -372,7 +372,3 @@ If you use this pipeline, please cite:
 - **Multiple-testing correction**: Benjamini & Hochberg (1995) *J. R. Stat. Soc. B* - Controlling the false discovery rate (BH-FDR applied within each module family)
 
 ---
-
-## License
-
-MIT License - see LICENSE file.
