@@ -6,6 +6,13 @@ A computational pipeline for identifying NMD-sensitive immunogenic mutations in 
 **Author:** Luigi Palese  
 **Supervisors:** Maria Anisimova, Tugce Bilgin Sonay, Erik Vassella, Massimo Maiolo
 
+> **Revision (October 2026).** The graded version placed the PTC of a frameshift at the position of the
+> mutation. The correct position is the first stop codon of the shifted frame, further downstream. The
+> corrected NMD labels and the rerun statistics are in [`revisions/2026-10_ptc_position/`](revisions/2026-10_ptc_position/README.md).
+> The code and `results/showcase/` are kept as graded. In short: neoepitope burden (Module 4) is unchanged,
+> and the NMD-label-dependent comparisons, already non-significant after BH correction, lose their nominal
+> significance.
+
 ---
 
 ## Background
@@ -285,6 +292,11 @@ Each neoantigen candidate from pVACseq is classified by NMD sensitivity using an
 | Unclassified | Missense variants or insufficient transcript info | NMD does not apply |
 
 The cohort report breaks these out by timepoint (primary vs recurrent) and per patient, which is the key analysis for the thesis hypothesis.
+
+**Known limitation (corrected in October 2026):** in `nmd_scoring.py` the PTC is taken to sit at the
+variant position. That holds for nonsense variants, but not for frameshifts, whose PTC is the first
+downstream stop codon. See [`revisions/2026-10_ptc_position/`](revisions/2026-10_ptc_position/README.md)
+for the repaired labels and their effect on the results.
 
 ---
 
