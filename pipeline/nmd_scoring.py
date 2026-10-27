@@ -4,12 +4,13 @@ nmd_scoring.py - GBM Pipeline Stage 3: per-sample NMD Sensitivity Scoring
 Part of the GBM NMD-Neoantigen Pipeline.
 https://github.com/paleslui/gbm-nmd-pipeline
 
-Scores each pVACseq neoantigen candidate for NMD sensitivity using an ensemble
-of two methods:
-  1. VEP NMD plugin (CSQ field) - requires Dragen/VEP-annotated VCF
-  2. Lindeboom et al. 2019 rule-based method (4 rules)
-
-Ensemble confidence 0-3: 3=both agree, 2=single method, 1=disagree, 0=no data.
+Scores each pVACseq neoantigen candidate for NMD sensitivity with the
+Lindeboom et al. 2019 rules, applied at the position of the premature
+termination codon (PTC) on the candidate's own transcript. For a frameshift the
+PTC is the first stop codon of the shifted reading frame (from the VEP HGVSp
+'fsTer' annotation), not the position of the mutation. The VEP NMD plugin field
+is still reported for reference but does not enter the classification, because
+it is computed at the variant position.
 This per-sample scorer runs once per sample in Stage 3; its outputs are
 aggregated across the cohort by nmd_cohort_summary.py.
 
@@ -18,9 +19,13 @@ INPUTS
   --pvacseq_tsv   pVACseq neoantigen candidates for one sample, e.g.
                   2_pvacseq/pvactools/<sample>/MHC_Class_I/<sample>.filtered.tsv
                   (required - one neoantigen candidate per row)
-  --vep_vcf       VEP-annotated VCF (optionally gzipped) for the same sample,
-                  used to read the NMD plugin field from the CSQ annotation.
-                  Optional - scoring falls back to Lindeboom rules only if absent.
+  --vep_vcf       VEP-annotated VCF (optionally gzipped) for the same sample.
+                  Provides exon, CDS/cDNA position and HGVSp of each transcript.
+                  Required for a classification; without it every candidate
+                  is UNKNOWN.
+  --gtf           Ensembl GTF matching the VEP cache (GRCh38, release 113).
+                  Used for the exon structure of each transcript. Parsed once
+                  and cached next to the GTF as <gtf>.nmd_models.pkl.
 
 OUTPUTS (written to --out_dir)
 ------------------------------
@@ -33,13 +38,13 @@ OUTPUTS (written to --out_dir)
 
 USAGE
 -----
-  python nmd_scoring.py --pvacseq_tsv <path> --vep_vcf <path> --out_dir <path>
-  python nmd_scoring.py --pvacseq_tsv <path> --out_dir <path>  # rule-based only
+  python nmd_scoring.py --pvacseq_tsv <path> --vep_vcf <path> --gtf <path> --out_dir <path>
 """
 
-import argparse, gzip, re
+import argparse, gzip, os, pickle, re
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 import matplotlib; matplotlib.use("Agg")
 import matplotlib.pyplot as plt
@@ -200,43 +205,141 @@ def _parse_exon(s: str) -> tuple:
         return None, None
 
 
-def score_nmd_rules(transcripts: list) -> tuple:
-    """Returns (classification, rule_applied, notes)."""
+def load_transcript_models(gtf_path: Path) -> dict:
+    """Exon structure of every Ensembl transcript with a CDS, from the GTF.
+
+    Returns a dict transcript_id (no version) -> {'exon_lens': [...] in
+    transcript order, 'cds_start_tx': 1-based transcript position of the first
+    CDS nucleotide}. The parsed models are cached as <gtf>.nmd_models.pkl.
+    """
+    cache = Path(str(gtf_path) + '.nmd_models.pkl')
+    if cache.exists():
+        with open(cache, 'rb') as fh:
+            return pickle.load(fh)
+    print(f"[INFO] Parsing transcript models from {gtf_path} (one-time, cached)")
+    raw = {}
+    opener = gzip.open if str(gtf_path).endswith('.gz') else open
+    with opener(gtf_path, 'rt') as fh:
+        for line in fh:
+            if line.startswith('#'):
+                continue
+            p = line.rstrip('\n').split('\t')
+            if p[2] not in ('exon', 'CDS', 'stop_codon'):
+                continue
+            m = re.search(r'transcript_id "([^"]+)"', p[8])
+            if not m:
+                continue
+            t = raw.setdefault(m.group(1), {'strand': p[6], 'exon': [], 'CDS': [], 'stop_codon': []})
+            t[p[2]].append((int(p[3]), int(p[4])))
+    models = {}
+    for tid, t in raw.items():
+        if not t['CDS']:
+            continue
+        rev = t['strand'] == '-'
+        exons = sorted(t['exon'], key=lambda e: e[0], reverse=rev)
+        coding = [x for a, b in t['CDS'] + t['stop_codon'] for x in (a, b)]
+        first = max(coding) if rev else min(coding)
+        off = 0
+        cds_start_tx = None
+        for a, b in exons:
+            if a <= first <= b:
+                cds_start_tx = off + (b - first + 1 if rev else first - a + 1)
+                break
+            off += b - a + 1
+        if cds_start_tx is None:
+            continue
+        models[tid] = {'exon_lens': [b - a + 1 for a, b in exons], 'cds_start_tx': cds_start_tx}
+    tmp = Path(str(cache) + f'.tmp{os.getpid()}')
+    with open(tmp, 'wb') as fh:
+        pickle.dump(models, fh)
+    os.replace(tmp, cache)
+    return models
+
+
+def _first_int(s) -> int:
+    m = re.match(r'(\d+)', str(s))
+    return int(m.group(1)) if m else None
+
+
+def _trim(ref: str, alt: str) -> tuple:
+    """Strip the shared leading bases (and '-' placeholders) of an indel."""
+    ref = '' if ref in ('-', '.') else str(ref)
+    alt = '' if alt in ('-', '.') else str(alt)
+    while ref and alt and ref[0] == alt[0]:
+        ref, alt = ref[1:], alt[1:]
+    return ref, alt
+
+
+def score_nmd_rules(transcripts: list, transcript_id: str, ref: str, alt: str,
+                    models: dict) -> tuple:
+    """Lindeboom rules at the PTC position. Returns (classification, rule_applied, notes).
+
+    The rules are read on the candidate's own transcript (pVACseq 'Transcript').
+    PTC position: for a frameshift the first stop codon of the shifted frame
+    (HGVSp 'p.<aa><pos><aa>fsTer<N>' -> stop codon <pos>+<N>-1; fallback
+    FrameshiftSequence length + 1); for a stop-gained variant the variant codon.
+    The exon holding the PTC, its length and the distance to the last exon
+    junction come from the transcript model, with exons downstream of a
+    frameshift shifted by the indel length.
+    """
     if not transcripts:
         return 'UNKNOWN', 'no_transcripts', ''
-    canon = [t for t in transcripts if t.get('CANONICAL') == 'YES'
-             and t.get('BIOTYPE') == 'protein_coding']
-    t = canon[0] if canon else transcripts[0]
-    if not any(c in t.get('Consequence', '') for c in TRUNCATING):
+    own = [t for t in transcripts if t.get('Feature') == transcript_id]
+    if own:
+        t = own[0]
+    else:
+        canon = [t for t in transcripts if t.get('CANONICAL') == 'YES'
+                 and t.get('BIOTYPE') == 'protein_coding']
+        t = canon[0] if canon else transcripts[0]
+    csq = t.get('Consequence', '')
+    if not any(c in csq for c in TRUNCATING):
         return 'NOT_APPLICABLE', 'not_truncating', ''
+    model = models.get(t.get('Feature', ''))
+    cds_var = _first_int(t.get('CDS_position', ''))
+    cdna_var = _first_int(t.get('cDNA_position', ''))
+    if model is None or cds_var is None or cdna_var is None:
+        return 'UNCERTAIN', 'insufficient_info', ''
 
-    exon_curr, exon_tot   = _parse_exon(t.get('EXON', ''))
-    cds_start, _, _       = _parse_pos(t.get('CDS_position', ''))
-    cdna_start, cdna_end, _ = _parse_pos(t.get('cDNA_position', ''))
+    delta = 0
+    if 'frameshift' in csq:
+        m = re.search(r'p\.[A-Za-z]{3}(\d+)[A-Za-z]{3}fsTer(\d+)', t.get('HGVSp', ''))
+        if m:
+            stop_aa = int(m.group(1)) + int(m.group(2)) - 1
+        elif t.get('FrameshiftSequence'):
+            stop_aa = len(t['FrameshiftSequence']) + 1
+        else:
+            return 'UNCERTAIN', 'no_stop_codon_found', ''
+        p_cds = 3 * (stop_aa - 1) + 1
+        r, a = _trim(ref, alt)
+        delta = len(a) - len(r)
+    else:
+        p_cds = 3 * ((cds_var - 1) // 3) + 1
 
-    notes = []
-    if exon_curr:  notes.append(f"exon {exon_curr}/{exon_tot}")
-    if cds_start:  notes.append(f"CDS {cds_start}nt")
-    n = '; '.join(notes)
+    cum = np.cumsum(model['exon_lens'])
+    k_v = int(np.searchsorted(cum, cdna_var))                 # exon of the variant (0-based)
+    cum = np.array([c + (delta if k >= k_v else 0) for k, c in enumerate(cum)])
+    p_tx = model['cds_start_tx'] + p_cds - 1
+    k_p = int(np.searchsorted(cum, p_tx))                     # exon of the PTC (0-based)
+    n = len(cum)
+    if k_p >= n:
+        return 'UNCERTAIN', 'insufficient_info', f'PTC CDS {p_cds}nt beyond transcript end'
+    exon_len = int(cum[k_p] - (cum[k_p - 1] if k_p > 0 else 0))
+    note = f'PTC CDS {p_cds}nt; exon {k_p + 1}/{n}; exon {exon_len}nt'
 
     # Rule 4: start-proximal PTC
-    if cds_start is not None and cds_start <= 150:
-        return 'INSENSITIVE', 'rule4_start_proximal_<150nt', n
-
-    if exon_curr is not None and exon_tot is not None:
-        # Rule 1: last exon
-        if exon_curr == exon_tot:
-            return 'INSENSITIVE', 'rule1_last_exon', n
-        # Rule 3: long exon >407nt
-        if cdna_start is not None and cdna_end is not None:
-            exon_len = abs(cdna_end - cdna_start) + 1
-            if exon_len > 407:
-                return 'INSENSITIVE', f'rule3_long_exon_>407nt', f"{n}; exon ~{exon_len}nt"
-        # Rule 2: 55nt boundary (canonical NMD trigger)
-        if exon_tot - exon_curr >= 1:
-            return 'SENSITIVE', 'rule2_55nt_boundary', n
-
-    return 'UNCERTAIN', 'insufficient_info', n
+    if p_cds <= 150:
+        return 'INSENSITIVE', 'rule4_start_proximal_<150nt', note
+    # Rule 1: last exon
+    if k_p == n - 1:
+        return 'INSENSITIVE', 'rule1_last_exon', note
+    # Rule 3: long exon >407nt
+    if exon_len > 407:
+        return 'INSENSITIVE', 'rule3_long_exon_>407nt', note
+    # Rule 2: 55nt boundary (canonical NMD trigger)
+    dist = int(cum[n - 2] - p_tx)
+    if dist > 55:
+        return 'SENSITIVE', 'rule2_55nt_boundary', f'{note}; {dist}nt to last EJ'
+    return 'INSENSITIVE', 'rule2_within_55nt', f'{note}; {dist}nt to last EJ'
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -265,12 +368,13 @@ def ensemble_nmd(vep: str, rule: str) -> tuple:
 RULE_EXPLANATIONS = {
     'rule1_last_exon':             'PTC in last exon - no downstream EJC',
     'rule2_55nt_boundary':         'PTC >55nt upstream of last exon junction - NMD-sensitive',
+    'rule2_within_55nt':           'PTC within 55nt of last exon junction - escapes',
     'rule3_long_exon_>407nt':      'PTC in long exon (>407nt) - reduced EJC density',
     'rule4_start_proximal_<150nt': 'PTC within 150nt of start codon - ribosome reinitiation',
 }
 
 
-def score_candidates(pvacseq_df: pd.DataFrame, vep_variants: dict) -> pd.DataFrame:
+def score_candidates(pvacseq_df: pd.DataFrame, vep_variants: dict, models: dict) -> pd.DataFrame:
     """Annotate every pVACseq candidate with NMD class, confidence and tier.
 
     For each candidate row, looks up its VEP transcript annotations by coordinate
@@ -297,9 +401,10 @@ def score_candidates(pvacseq_df: pd.DataFrame, vep_variants: dict) -> pd.DataFra
         transcripts = vep_variants.get((chrom, pos, ref, alt),
                       vep_variants.get((chrom, pos+1, ref, alt), []))
 
-        vep_nmd                       = score_nmd_vep_plugin(transcripts)
-        rule_nmd, rule_applied, notes = score_nmd_rules(transcripts)
-        consensus, confidence, score  = ensemble_nmd(vep_nmd, rule_nmd)
+        vep_nmd                       = score_nmd_vep_plugin(transcripts)   # reference only
+        rule_nmd, rule_applied, notes = score_nmd_rules(transcripts, str(row.get('Transcript', '')),
+                                                        str(ref), str(alt), models)
+        consensus, confidence, score  = ensemble_nmd(None, rule_nmd)
 
         best_ic50   = float(row.get('Best MT IC50 Score', 9999))
         median_ic50 = float(row.get('Median MT IC50 Score', 9999))
@@ -582,8 +687,8 @@ def generate_report(scored_df: pd.DataFrame, out_dir: Path):
 
 <h2>What is this report?</h2>
 <p class="sub">
-  Each pVACseq neoantigen candidate is classified by NMD sensitivity using an ensemble of two
-  methods: the VEP NMD plugin and Lindeboom et al. 2019 rule-based scoring.
+  Each pVACseq neoantigen candidate is classified by NMD sensitivity with the Lindeboom et al. 2019
+  rules, applied at the position of the PTC (for frameshifts: the first downstream stop codon).
   The core hypothesis is that TMZ-induced frameshift mutations create PTCs silenced by NMD -
   NMD inhibition could expose these neoantigens to immune recognition.
 </p>
@@ -619,21 +724,17 @@ Alleles with multiple high-confidence binders are the strongest therapeutic targ
 {conf_cards()}
 
 <h2>NMD Scoring Methods</h2>
-<h3>Method 1 - VEP NMD Plugin</h3>
-<p class="sub">
-  The VEP NMD plugin (Ensembl v105+) annotates truncating variants with NMD_escaping_variant
-  when the PTC is predicted to escape NMD. An empty NMD field on a truncating variant means
-  NMD is triggered (SENSITIVE). Requires Dragen VEP-annotated VCF with --plugin NMD.
-</p>
-
-<h3>Method 2 - Lindeboom Rules (Nat Cell Biol 2019)</h3>
-<p class="sub">Applied to frameshift and stop-gained variants. Rules in priority order:</p>
+<h3>Lindeboom Rules (Nat Genet 2019)</h3>
+<p class="sub">Applied to frameshift and stop-gained variants, at the PTC position on the candidate's own
+transcript. For a frameshift the PTC is the first stop codon of the shifted frame. Rules in priority order:</p>
 <ul style="font-size:13px;color:#444;margin:0 0 12px 20px;line-height:1.8">
   <li><strong>Rule 4 - Start-proximal PTC (&lt;150nt):</strong> Pioneer round completes before NMD surveillance → INSENSITIVE</li>
   <li><strong>Rule 1 - Last exon:</strong> No downstream EJC to trigger NMD → INSENSITIVE</li>
   <li><strong>Rule 3 - Long exon (&gt;407nt):</strong> EJC too far downstream → INSENSITIVE</li>
-  <li><strong>Rule 2 - 55nt boundary:</strong> PTC &gt;55nt upstream of last EJC → SENSITIVE (canonical NMD)</li>
+  <li><strong>Rule 2 - 55nt boundary:</strong> PTC &gt;55nt upstream of last EJC → SENSITIVE (canonical NMD), otherwise INSENSITIVE</li>
 </ul>
+<p class="sub">The VEP NMD plugin result is shown for reference only; it is computed at the variant position
+and does not enter the classification.</p>
 <div class="note">⚠ NMD rules only apply to truncating mutations.
 Missense variants (NOT_APPLICABLE) are not subject to NMD but remain immunogenic neoantigen candidates.</div>
 
@@ -694,6 +795,8 @@ def main():
                         help='pVACseq candidates TSV for one sample (required).')
     parser.add_argument('--vep_vcf', default=None,
                         help='VEP-annotated VCF (gzipped). Optional - rule-based only if absent.')
+    parser.add_argument('--gtf', required=True,
+                        help='Ensembl GTF matching the VEP cache (exon structure of each transcript).')
     parser.add_argument('--out_dir', default='./nmd_output',
                         help='Output directory for the per-sample NMD report.')
     args = parser.parse_args()
@@ -714,7 +817,8 @@ def main():
         print("\n[INFO] No VEP VCF provided - rule-based scoring only")
 
     print("\n[INFO] Scoring NMD sensitivity...")
-    scored_df = score_candidates(pvacseq_df, vep_variants)
+    models = load_transcript_models(Path(args.gtf))
+    scored_df = score_candidates(pvacseq_df, vep_variants, models)
     scored_df.to_csv(out_dir / "nmd_scored_candidates.tsv", sep='\t', index=False)
     print(f"[TABLE] Saved {out_dir}/nmd_scored_candidates.tsv")
 

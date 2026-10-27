@@ -87,11 +87,13 @@ for TSV in $FILTERED_TSVS; do
     if [ -n "$VEP_VCF" ]; then
         $CONDA_PREFIX/bin/python $PIPELINE/nmd_scoring.py \
             --pvacseq_tsv $TSV \
+            --gtf $ENSEMBL_GTF \
             --vep_vcf $VEP_VCF \
             --out_dir $OUT_DIR || { echo "[ERROR] nmd_scoring.py failed for ${SAMPLE}" >&2; exit 1; }
     else
         $CONDA_PREFIX/bin/python $PIPELINE/nmd_scoring.py \
             --pvacseq_tsv $TSV \
+            --gtf $ENSEMBL_GTF \
             --out_dir $OUT_DIR || { echo "[ERROR] nmd_scoring.py failed for ${SAMPLE}" >&2; exit 1; }
     fi
 done

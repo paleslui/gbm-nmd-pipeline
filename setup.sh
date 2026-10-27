@@ -313,6 +313,20 @@ else
     echo "[OK] VEP cache downloaded"
 fi
 
+# ── Step 5b: Download the Ensembl 113 GTF (exon models for NMD scoring) ─────
+echo ""
+echo "[STEP 5b] Downloading Ensembl 113 GTF..."
+if [ -s "$ENSEMBL_GTF" ]; then
+    echo "[OK] Ensembl GTF already present"
+else
+    mkdir -p $(dirname $ENSEMBL_GTF)
+    wget -q -O $ENSEMBL_GTF.part \
+        https://ftp.ensembl.org/pub/release-113/gtf/homo_sapiens/Homo_sapiens.GRCh38.113.gtf.gz \
+        && mv $ENSEMBL_GTF.part $ENSEMBL_GTF \
+        || { echo "[ERROR] Ensembl GTF download failed" >&2; exit 1; }
+    echo "[OK] Ensembl GTF downloaded"
+fi
+
 # ── Step 6: Patch vep/main.nf to unset PERL5LIB ──────────────────────────────
 echo ""
 echo "[STEP 6] Patching vep/main.nf for Perl compatibility..."

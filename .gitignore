@@ -72,3 +72,6 @@ resources/VEP_plugins/
 
 # Capture-kit BED files (usually proprietary vendor files)
 resources/*.bed
+
+# Ensembl GTF downloaded by setup.sh (exon models for NMD scoring)
+resources/ensembl/

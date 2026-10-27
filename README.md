@@ -6,12 +6,9 @@ A computational pipeline for identifying NMD-sensitive immunogenic mutations in 
 **Author:** Luigi Palese  
 **Supervisors:** Maria Anisimova, Tugce Bilgin Sonay, Erik Vassella, Massimo Maiolo
 
-> **Revision (October 2026).** The graded version placed the PTC of a frameshift at the position of the
-> mutation. The correct position is the first stop codon of the shifted frame, further downstream. The
-> corrected NMD labels and the rerun statistics are in [`revisions/2026-10_ptc_position/`](revisions/2026-10_ptc_position/README.md).
-> The code and `results/showcase/` are kept as graded. In short: neoepitope burden (Module 4) is unchanged,
-> and the NMD-label-dependent comparisons, already non-significant after BH correction, lose their nominal
-> significance.
+> **Update (October 2026).** NMD scoring now places the PTC of a frameshift at the real stop codon
+> (the first stop of the shifted reading frame) instead of at the position of the mutation. Results in
+> `results/showcase/` were regenerated with the fixed scoring.
 
 ---
 
@@ -29,7 +26,7 @@ The pipeline runs in three stages, all submitted by a single master SLURM script
 |-------|--------|----------|
 | **1** | `gbm_analysis.py` | Mutation landscape: VCF parsing, mutation burden, paired T/M comparison, gene-level recurrence, HLA typing summary, SBS11 (temozolomide) mutational-signature analysis |
 | **2** | `nextflow-pvacseq` | NMD-relevant variant filter → VEP v113 annotation (NMD plugin) + pVACseq neoantigen prediction (MHC Class I, 8 algorithms) |
-| **3** | `nmd_scoring.py` + `nmd_cohort_summary.py` | NMD sensitivity scoring per sample (ensemble of VEP NMD plugin + Lindeboom rules) and cohort-level aggregate report |
+| **3** | `nmd_scoring.py` + `nmd_cohort_summary.py` | NMD sensitivity scoring per sample (Lindeboom rules at the PTC position) and cohort-level aggregate report |
 
 A single `sbatch master_pipeline.sh` produces a complete, reproducible run with all three stages chained together.
 
@@ -43,7 +40,7 @@ The three stages implement five analytical modules. Modules 1–2 run in Stage 1
 |---|--------|---------------|----------------|---------------|
 | **1** | Mutation burden analysis (Stage 1) | Whether tumour mutation burden (TMB) shifts between primary (T) and recurrent (M) timepoints across paired patients. | `1_gbm_analysis/sample_mutation_summary.tsv` | `plot_paired_tmb.png` |
 | **2** | Truncating mutation enrichment (Stage 1) | Whether the fraction of truncating variants (frameshift / stop-gained / splice / start-lost) is enriched at recurrence - the PTC-generating events NMD acts on. | `1_gbm_analysis/sample_mutation_summary.tsv` | `plot_paired_truncating_fraction.png` |
-| **3** | NMD-sensitive mutation analysis (Stage 3) | Whether the count of NMD-sensitive truncating variants (VEP NMD plugin + Lindeboom ensemble) changes between T and M. | `3_nmd_analysis/cohort/per_sample_nmd_summary.tsv` | `m3_nmd_sensitive_paired.png` |
+| **3** | NMD-sensitive mutation analysis (Stage 3) | Whether the count of NMD-sensitive truncating variants (Lindeboom rules at the PTC position) changes between T and M. | `3_nmd_analysis/cohort/per_sample_nmd_summary.tsv` | `m3_nmd_sensitive_paired.png` |
 | **4** | Neoepitope burden analysis (Stage 3) | Whether the per-sample neoepitope (neoantigen) burden from pVACseq differs between timepoints. | `3_nmd_analysis/cohort/per_sample_neoepitope_summary.tsv` | `m4_neoepitope_burden_paired.png` |
 | **5** | Neoepitopes stratified by NMD status (Stage 3) | Whether neoepitopes arising from NMD-sensitive vs NMD-insensitive transcripts diverge between T and M - the core thesis hypothesis (epitopes silenced by NMD). | `3_nmd_analysis/cohort/per_sample_neoepitope_nmd_summary.tsv` | `m5_neoepitope_by_nmd_paired.png` |
 
@@ -268,19 +265,21 @@ The filter is idempotent - already-filtered VCFs in `data/vcf_filtered/` are ski
 
 ## NMD Scoring
 
-Each neoantigen candidate from pVACseq is classified by NMD sensitivity using an **ensemble of two methods**:
-
-1. **VEP NMD plugin** (Ensembl) - reads the `NMD` field from the VEP CSQ annotation. An empty NMD field on a truncating variant means NMD is triggered (SENSITIVE). `NMD_escaping_variant` = INSENSITIVE.
-2. **Lindeboom rules** ([Lindeboom et al. 2019, *Nat Genet*](https://www.nature.com/articles/s41588-019-0517-5)) - applied in priority order:
+Each neoantigen candidate from pVACseq is classified by NMD sensitivity with the **Lindeboom rules**
+([Lindeboom et al. 2019, *Nat Genet*](https://www.nature.com/articles/s41588-019-0517-5)), applied at the
+position of the **premature termination codon (PTC)** on the candidate's own transcript. For a stop-gained
+variant the PTC is the variant itself; for a frameshift it is the first stop codon of the shifted reading frame
+(read from the VEP `HGVSp` annotation). Exon structures come from the Ensembl 113 GTF (downloaded by `setup.sh`).
+The rules are applied in priority order:
 
 | Rule | Condition | Classification |
 |------|-----------|----------------|
 | Rule 4 | PTC within 150 nt of start codon | INSENSITIVE (pioneer round escape) |
 | Rule 1 | PTC in last exon | INSENSITIVE (no downstream EJC) |
 | Rule 3 | PTC in exon > 407 nt | INSENSITIVE (EJC density too low) |
-| Rule 2 | PTC > 55 nt upstream of last EJC | SENSITIVE (canonical NMD) |
+| Rule 2 | PTC > 55 nt upstream of last EJC | SENSITIVE (canonical NMD); otherwise INSENSITIVE |
 
-**Ensemble confidence score (0–3):** 3 = both methods agree, 2 = single method available, 1 = methods disagree, 0 = no data.
+The VEP NMD plugin field is still reported (`nmd_vep_plugin`) for reference, but it is computed at the variant position and does not enter the classification.
 
 **Priority tiers:**
 
@@ -292,11 +291,6 @@ Each neoantigen candidate from pVACseq is classified by NMD sensitivity using an
 | Unclassified | Missense variants or insufficient transcript info | NMD does not apply |
 
 The cohort report breaks these out by timepoint (primary vs recurrent) and per patient, which is the key analysis for the thesis hypothesis.
-
-**Known limitation (corrected in October 2026):** in `nmd_scoring.py` the PTC is taken to sit at the
-variant position. That holds for nonsense variants, but not for frameshifts, whose PTC is the first
-downstream stop codon. See [`revisions/2026-10_ptc_position/`](revisions/2026-10_ptc_position/README.md)
-for the repaired labels and their effect on the results.
 
 ---
 

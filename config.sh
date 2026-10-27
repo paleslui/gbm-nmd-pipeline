@@ -56,6 +56,7 @@ IEDB=$RESOURCES/iedb
 VEP_PLUGINS=$RESOURCES/VEP_plugins
 VEP_CACHE=$RESOURCES/vep_cache
 VEP_CACHE_VERSION=113
+ENSEMBL_GTF=$RESOURCES/ensembl/Homo_sapiens.GRCh38.113.gtf.gz   # exon models for NMD scoring
 
 # Nextflow work directory (large, not in repo)
 NEXTFLOW_WORK=$BASE/nextflow_work
